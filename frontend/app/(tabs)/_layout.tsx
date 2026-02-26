@@ -19,18 +19,19 @@ export default function DeliveryTabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: "#8E8E93",
+        tabBarInactiveTintColor: "#6B7280",
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.label,
         tabBarBackground: Platform.OS === 'ios' ? () => (
           <BlurView
-            intensity={90}
+            intensity={100}
             tint="light"
             style={styles.blurBackground}
           />
         ) : () => (
           <View style={styles.androidBackground} />
         ),
+        tabBarItemStyle: styles.tabBarItem,
       }}
     >
       <Tabs.Screen
@@ -39,7 +40,7 @@ export default function DeliveryTabsLayout() {
           title: "Home",
           tabBarIcon: ({ color, size, focused }) => (
             <AnimatedIcon
-              name="home"
+              name="home-outline"
               focusedName="home"
               size={size}
               color={color}
@@ -68,7 +69,7 @@ export default function DeliveryTabsLayout() {
       <Tabs.Screen
         name="notifications"
         options={{
-          title: "Notifications",
+          title: "Alerts",
           tabBarIcon: ({ color, size, focused }) => (
             <NotificationIconWithBadge
               color={color}
@@ -113,14 +114,19 @@ function AnimatedIcon({
   color: string;
   focused: boolean;
 }) {
-  const scale = useSharedValue(focused ? 1 : 0.9);
-  const opacity = useSharedValue(focused ? 1 : 0.7);
+  const scale = useSharedValue(focused ? 1 : 0.95);
+  const opacity = useSharedValue(focused ? 1 : 0.6);
+  const translateY = useSharedValue(focused ? -2 : 0);
 
-  scale.value = withTiming(focused ? 1 : 0.9, { duration: 180 });
-  opacity.value = withTiming(focused ? 1 : 0.7, { duration: 180 });
+  scale.value = withTiming(focused ? 1 : 0.95, { duration: 200 });
+  opacity.value = withTiming(focused ? 1 : 0.6, { duration: 200 });
+  translateY.value = withTiming(focused ? -2 : 0, { duration: 200 });
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+    transform: [
+      { scale: scale.value },
+      { translateY: translateY.value }
+    ],
     opacity: opacity.value,
   }));
 
@@ -142,14 +148,19 @@ function NotificationIconWithBadge({ color, size, focused, unreadCount }: {
   focused: boolean;
   unreadCount: number;
 }) {
-  const scale = useSharedValue(focused ? 1 : 0.9);
-  const opacity = useSharedValue(focused ? 1 : 0.7);
+  const scale = useSharedValue(focused ? 1 : 0.95);
+  const opacity = useSharedValue(focused ? 1 : 0.6);
+  const translateY = useSharedValue(focused ? -2 : 0);
 
-  scale.value = withTiming(focused ? 1 : 0.9, { duration: 180 });
-  opacity.value = withTiming(focused ? 1 : 0.7, { duration: 180 });
+  scale.value = withTiming(focused ? 1 : 0.95, { duration: 200 });
+  opacity.value = withTiming(focused ? 1 : 0.6, { duration: 200 });
+  translateY.value = withTiming(focused ? -2 : 0, { duration: 200 });
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+    transform: [
+      { scale: scale.value },
+      { translateY: translateY.value }
+    ],
     opacity: opacity.value,
   }));
 
@@ -178,37 +189,44 @@ function NotificationIconWithBadge({ color, size, focused, unreadCount }: {
 
 const styles = StyleSheet.create({
   tabBar: {
-    height: Platform.OS === 'ios' ? 85 : 70,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-    paddingTop: 12,
-    backgroundColor: Platform.OS === 'ios' ? 'transparent' : 'rgba(255, 255, 255, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(229, 231, 235, 0.8)',
-    elevation: 8,
+    height: Platform.OS === 'ios' ? 88 : 68,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+    paddingTop: 10,
+    backgroundColor: Platform.OS === 'ios' ? 'transparent' : '#FFFFFF',
+    borderTopWidth: 0,
+    elevation: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    position: 'absolute',
+    overflow: 'hidden',
   },
 
   blurBackground: {
     ...StyleSheet.absoluteFillObject,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(229, 231, 235, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderTopWidth: 0,
   },
 
   androidBackground: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(229, 231, 235, 0.8)',
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 0,
   },
 
   label: {
     fontSize: 11,
     fontWeight: "600",
-    marginTop: 4,
-    letterSpacing: -0.2,
+    marginTop: 6,
+    letterSpacing: -0.3,
+    fontFamily: Platform.OS === 'ios' ? 'SF Pro Text' : 'sans-serif-medium',
+  },
+
+  tabBarItem: {
+    paddingVertical: 4,
   },
 
   iconWrapper: {
@@ -225,36 +243,37 @@ const styles = StyleSheet.create({
 
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -6,
+    top: -6,
+    right: -8,
     backgroundColor: Colors.secondary,
-    borderRadius: 9,
-    minWidth: 18,
-    height: 18,
+    borderRadius: 12,
+    minWidth: 20,
+    height: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
     borderWidth: 2,
-    borderColor: Platform.OS === 'ios' ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.9)',
+    borderColor: '#FFFFFF',
     shadowColor: Colors.secondary,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
   },
 
   badgeSmall: {
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 3,
-    borderRadius: 8,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 10,
   },
 
   badgeText: {
     color: 'white',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '800',
     textAlign: 'center',
-    lineHeight: 10,
+    lineHeight: 12,
+    letterSpacing: -0.3,
   },
 });

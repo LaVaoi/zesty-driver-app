@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  FlatList,
+  SafeAreaView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/Colors';
 import { ListItemSkeleton, Skeleton } from '@/components/ui/skeleton';
-import { useDeliveryManNotifications } from '@/hooks/useDeliveryManNotifications'; // ✅ Changed to deliveryman hook
+import { useDeliveryManNotifications } from '@/hooks/useDeliveryManNotifications';
 
 interface Notification {
   id: number;
@@ -31,10 +33,140 @@ interface Notification {
   customer_name: string | null;
 }
 
+// Memoized Notification Card Component
+const NotificationCard = memo(({
+  notification,
+  isLiveNotification,
+  onPress,
+  getIconName,
+  getIconColor,
+  formatDate
+}: {
+  notification: Notification;
+  isLiveNotification: boolean;
+  onPress: () => void;
+  getIconName: (type: string, status: string | null) => string;
+  getIconColor: (type: string, status: string | null) => string;
+  formatDate: (date: string) => string;
+}) => {
+  const isUnread = notification.is_read === 0;
+  const iconColor = getIconColor(notification.type, notification.status);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={styles.cardTouchable}
+    >
+      <View style={[
+        styles.card,
+        isUnread && styles.cardUnread,
+        isLiveNotification && styles.cardLive
+      ]}>
+        {/* Left: Type Indicator Dot */}
+        <View style={[styles.typeDot, { backgroundColor: iconColor }]} />
+
+        {/* Center: Content */}
+        <View style={styles.cardContent}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {notification.title}
+            </Text>
+            <Text style={styles.cardTime}>
+              {formatDate(notification.created_at)}
+            </Text>
+          </View>
+
+          <Text style={styles.cardMessage} numberOfLines={2}>
+            {notification.message}
+          </Text>
+
+          {/* Order & Customer Info */}
+          <View style={styles.cardMeta}>
+            {notification.order_number && (
+              <View style={styles.metaItem}>
+                <Ionicons name="receipt-outline" size={14} color={Colors.primary} />
+                <Text style={styles.metaText}>#{notification.order_number}</Text>
+              </View>
+            )}
+            {notification.customer_name && (
+              <View style={styles.metaItem}>
+                <Ionicons name="person-outline" size={14} color={Colors.text.secondary} />
+                <Text style={styles.metaText}>{notification.customer_name}</Text>
+              </View>
+            )}
+            {isLiveNotification && (
+              <View style={styles.liveChip}>
+                <Text style={styles.liveChipText}>LIVE</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Right: Unread Indicator & Chevron */}
+        <View style={styles.cardRight}>
+          {isUnread && <View style={styles.unreadDot} />}
+          <Ionicons name="chevron-forward" size={20} color={Colors.gray[400]} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// Skeleton Loader Component
+const SkeletonLoader = () => (
+  <View style={styles.skeletonContainer}>
+    {[1, 2, 3, 4, 5].map((i) => (
+      <View key={i} style={styles.skeletonCard}>
+        <View style={styles.skeletonDot} />
+        <View style={styles.skeletonContent}>
+          <View style={styles.skeletonHeader}>
+            <View style={styles.skeletonTitle} />
+            <View style={styles.skeletonTime} />
+          </View>
+          <View style={styles.skeletonMessage} />
+          <View style={styles.skeletonMeta} />
+        </View>
+      </View>
+    ))}
+  </View>
+);
+
+// Empty State Component
+const EmptyState = ({ onRefresh }: { onRefresh: () => void }) => (
+  <View style={styles.emptyContainer}>
+    <View style={styles.emptyIconContainer}>
+      <Ionicons name="notifications-off-outline" size={48} color={Colors.primary} />
+    </View>
+    <Text style={styles.emptyTitle}>All caught up!</Text>
+    <Text style={styles.emptyMessage}>
+      No new notifications. We'll notify you when something arrives.
+    </Text>
+    <TouchableOpacity style={styles.emptyButton} onPress={onRefresh}>
+      <Text style={styles.emptyButtonText}>Refresh</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+// Error State Component
+const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
+  <View style={styles.errorContainer}>
+    <View style={styles.errorIconContainer}>
+      <Ionicons name="alert-circle-outline" size={48} color={Colors.error} />
+    </View>
+    <Text style={styles.errorTitle}>Something went wrong</Text>
+    <Text style={styles.errorMessage}>
+      We couldn't load your notifications. Please try again.
+    </Text>
+    <TouchableOpacity style={styles.errorButton} onPress={onRetry}>
+      <Text style={styles.errorButtonText}>Try Again</Text>
+    </TouchableOpacity>
+  </View>
+);
+
 const NotificationsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
 
-  // Use the DeliveryMan WebSocket hook
   const {
     unreadCount: wsUnreadCount,
     liveNotifications,
@@ -44,62 +176,57 @@ const NotificationsScreen: React.FC = () => {
     isConnected,
     reconnectWebSocket,
     refreshUnreadCount: refreshWsUnreadCount
-  } = useDeliveryManNotifications(); // ✅ Changed to deliveryman hook
+  } = useDeliveryManNotifications();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [apiNotifications, setApiNotifications] = useState<Notification[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Merge WebSocket notifications with API notifications
   useEffect(() => {
-    // Combine both sources, remove duplicates by ID
-    const combined = [...apiNotifications];
+    try {
+      const combined = [...apiNotifications];
 
-    liveNotifications.forEach(wsNotif => {
-      // Check if exists in apiNotifications
-      const existingIndex = combined.findIndex(n => n.id === wsNotif.id);
+      liveNotifications.forEach(wsNotif => {
+        const existingIndex = combined.findIndex(n => n.id === wsNotif.id);
 
-      if (existingIndex >= 0) {
-        // Update existing notification with WebSocket data
-        combined[existingIndex] = {
-          ...combined[existingIndex],
-          is_read: wsNotif.is_read ? 1 : 0, // Keep the read status from WebSocket
-          // You might want to update other fields too
-        };
-      } else {
-        // Add new WebSocket notification
-        combined.push({
-          id: wsNotif.id,
-          order_id: wsNotif.data?.order_id || null,
-          type: wsNotif.data?.type || 'general',
-          title: wsNotif.title,
-          message: wsNotif.message,
-          is_read: wsNotif.is_read ? 1 : 0,
-          created_at: wsNotif.created_at,
-          order_number: wsNotif.data?.order_number || null,
-          status: wsNotif.data?.status || null,
-          customer_name: wsNotif.data?.customer_name || null
-        });
-      }
-    });
+        if (existingIndex >= 0) {
+          combined[existingIndex] = {
+            ...combined[existingIndex],
+            is_read: wsNotif.is_read ? 1 : 0,
+          };
+        } else {
+          combined.push({
+            id: wsNotif.id,
+            order_id: wsNotif.data?.order_id || null,
+            type: wsNotif.data?.type || 'general',
+            title: wsNotif.title,
+            message: wsNotif.message,
+            is_read: wsNotif.is_read ? 1 : 0,
+            created_at: wsNotif.created_at,
+            order_number: wsNotif.data?.order_number || null,
+            status: wsNotif.data?.status || null,
+            customer_name: wsNotif.data?.customer_name || null
+          });
+        }
+      });
 
-    // Sort by date (newest first)
-    combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    setNotifications(combined);
-
-    // Calculate unread count from combined notifications
-    const unread = combined.filter(n => n.is_read === 0).length;
-    setUnreadCount(unread);
-
-    console.log(`📊 Total notifications: ${combined.length}, Unread: ${unread}`);
+      combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setNotifications(combined);
+      setUnreadCount(combined.filter(n => n.is_read === 0).length);
+      setError(null);
+    } catch (err) {
+      setError('Failed to process notifications');
+    }
   }, [apiNotifications, liveNotifications]);
 
   const fetchNotifications = useCallback(async () => {
     try {
+      setError(null);
       const token = await AsyncStorage.getItem('deliveryManToken');
       if (!token) return;
 
@@ -115,34 +242,28 @@ const NotificationsScreen: React.FC = () => {
       } else if (response.status === 401) {
         Alert.alert('Session Expired', 'Please login again');
         await AsyncStorage.removeItem('deliveryManToken');
+      } else {
+        setError('Failed to fetch notifications');
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
-      if (!refreshing) {
-        Alert.alert('Error', 'Failed to fetch notifications');
-      }
+      setError('Network error. Please check your connection.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [refreshing]);
+  }, []);
 
   const fetchUnreadCountFromAPI = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('deliveryManToken');
       if (!token) return;
 
-      const response = await fetch('https://ubua.cloud/api/delivery/notifications/unread-count', {
+      await fetch('https://ubua.cloud/api/delivery/notifications/unread-count', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        // We'll use the combined count instead
-        // setUnreadCount(data.unreadCount || 0);
-      }
     } catch (error) {
       console.error('Error fetching unread count:', error);
     }
@@ -152,10 +273,9 @@ const NotificationsScreen: React.FC = () => {
     fetchNotifications();
     fetchUnreadCountFromAPI();
 
-    // Set up periodic refresh for API notifications
     const interval = setInterval(() => {
       fetchNotifications();
-    }, 30000); // Every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [fetchNotifications, fetchUnreadCountFromAPI]);
@@ -164,7 +284,7 @@ const NotificationsScreen: React.FC = () => {
     setRefreshing(true);
     fetchNotifications();
     fetchUnreadCountFromAPI();
-    refreshWsUnreadCount(); // Also refresh WebSocket unread count
+    refreshWsUnreadCount();
   }, [fetchNotifications, fetchUnreadCountFromAPI, refreshWsUnreadCount]);
 
   const markAsRead = async (notificationId: number) => {
@@ -172,7 +292,6 @@ const NotificationsScreen: React.FC = () => {
       const token = await AsyncStorage.getItem('deliveryManToken');
       if (!token) return;
 
-      // Update UI immediately - mark as read but keep in list
       setNotifications(prev =>
         prev.map(n =>
           n.id === notificationId
@@ -181,19 +300,14 @@ const NotificationsScreen: React.FC = () => {
         )
       );
 
-      // Also update unread count
       setUnreadCount(prev => Math.max(0, prev - 1));
-
-      // Use WebSocket function to mark as read
       markLiveNotificationAsRead(notificationId);
-
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
   };
 
-  // Replace the markAllAsRead function with:
   const markAllAsRead = async () => {
     try {
       const token = await AsyncStorage.getItem('deliveryManToken');
@@ -201,24 +315,18 @@ const NotificationsScreen: React.FC = () => {
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      // Mark all as read in UI but keep in list
       setNotifications(prev =>
         prev.map(n => ({ ...n, is_read: 1 }))
       );
 
-      // Reset unread count
       setUnreadCount(0);
-
-      // Use WebSocket clear function
       clearLiveNotifications();
-
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Error marking all as read:', error);
       Alert.alert('Error', 'Failed to mark all notifications as read');
     }
   };
-
 
   const getNotificationIcon = useCallback((type: string, status: string | null) => {
     if (status) {
@@ -254,9 +362,8 @@ const NotificationsScreen: React.FC = () => {
     if (status) {
       switch (status) {
         case 'Pending':
-          return '#FF9500';
         case 'Preparing':
-          return '#FF9500';
+          return '#FF9500'; // Zesty Orange
         case 'OutForDelivery':
           return '#2196F3';
         case 'Delivered':
@@ -268,13 +375,13 @@ const NotificationsScreen: React.FC = () => {
 
     switch (type) {
       case 'order_assigned':
-        return Colors.primary;
+        return Colors.primary; // Zesty Green
       case 'order_delivered':
         return Colors.success;
       case 'order_status_update':
         return '#2196F3';
       case 'new_order_available':
-        return '#FF9500';
+        return '#FF9500'; // Zesty Orange
       default:
         return Colors.text.secondary;
     }
@@ -289,399 +396,437 @@ const NotificationsScreen: React.FC = () => {
     const days = Math.floor(hours / 24);
 
     if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
+    if (minutes < 60) return `${minutes}m`;
+    if (hours < 24) return `${hours}h`;
+    if (days < 7) return `${days}d`;
     return date.toLocaleDateString();
   }, []);
 
-  const renderSkeleton = () => (
-    <ScrollView
-      style={styles.scrollView}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      {[1, 2, 3, 4, 5].map((item) => (
-        <ListItemSkeleton key={item} />
-      ))}
-    </ScrollView>
-  );
-
-  // Connection status indicator
   const renderConnectionStatus = () => (
-    <View style={styles.connectionStatus}>
-      <View
-        style={[
-          styles.connectionDot,
-          { backgroundColor: isConnected ? Colors.success : Colors.error }
-        ]}
-      />
+    <TouchableOpacity
+      style={styles.connectionChip}
+      onPress={!isConnected ? reconnectWebSocket : undefined}
+      disabled={isConnected}
+    >
+      <View style={[styles.connectionDot, { backgroundColor: isConnected ? Colors.success : Colors.error }]} />
       <Text style={styles.connectionText}>
-        {isConnected ? 'Live' : 'Connecting...'}
+        {isConnected ? 'Live' : 'Offline'}
       </Text>
       {!isConnected && (
-        <TouchableOpacity onPress={reconnectWebSocket}>
-          <Text style={styles.reconnectText}>Retry</Text>
-        </TouchableOpacity>
+        <Ionicons name="refresh" size={14} color="#fff" style={styles.connectionIcon} />
       )}
-    </View>
+    </TouchableOpacity>
   );
 
-  if (loading && notifications.length === 0) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <LinearGradient
-          colors={[Colors.dark, Colors.darkLight]}
-          style={styles.header}
-        >
-          <View style={styles.headerContent}>
-            <View>
-              <Text style={styles.headerTitle}>Notifications</Text>
-              <Text style={styles.headerSubtitle}>Loading...</Text>
-            </View>
-            <Ionicons name="notifications" size={32} color="#fff" />
-          </View>
-        </LinearGradient>
-        {renderSkeleton()}
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <LinearGradient
-        colors={[Colors.dark, Colors.darkLight]}
-        style={styles.header}
-      >
-        <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.headerTitle}>Notifications</Text>
+  const renderHeader = () => (
+    <LinearGradient
+      colors={[Colors.dark, Colors.darkLight]}
+      style={[styles.header, { paddingTop: insets.top + 10 }]}
+    >
+      <View style={styles.headerTop}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Notifications</Text>
+          <View style={styles.headerMeta}>
             <Text style={styles.headerSubtitle}>
               {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
             </Text>
             {renderConnectionStatus()}
           </View>
-          <View style={styles.headerRight}>
-            {unreadCount > 0 && (
-              <TouchableOpacity
-                onPress={markAllAsRead}
-                style={styles.markAllButton}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="checkmark-done" size={20} color="#fff" />
-                <Text style={styles.markAllText}>Mark all read</Text>
-              </TouchableOpacity>
-            )}
-            <View style={styles.notificationIconContainer}>
-              <Ionicons name="notifications" size={32} color="#fff" />
-              {unreadCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
         </View>
-      </LinearGradient>
+        {unreadCount > 0 && (
+          <TouchableOpacity
+            onPress={markAllAsRead}
+            style={styles.markAllButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="checkmark-done" size={20} color={Colors.primary} />
+            <Text style={styles.markAllText}>Mark all read</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </LinearGradient>
+  );
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+  if (loading && notifications.length === 0) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        {renderHeader()}
+        <SkeletonLoader />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {renderHeader()}
+
+      <FlatList
+        data={notifications}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <NotificationCard
+            notification={item}
+            isLiveNotification={liveNotifications.some(n => n.id === item.id)}
+            onPress={() => {
+              if (item.is_read === 0) {
+                markAsRead(item.id);
+              }
+            }}
+            getIconName={getNotificationIcon}
+            getIconColor={getNotificationColor}
+            formatDate={formatDate}
+          />
+        )}
+        contentContainerStyle={styles.listContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
+          />
+        }
+        ListEmptyComponent={
+          error ? (
+            <ErrorState onRetry={fetchNotifications} />
+          ) : (
+            <EmptyState onRefresh={onRefresh} />
+          )
         }
         showsVerticalScrollIndicator={false}
-      >
-        {notifications.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="notifications-off-outline" size={64} color={Colors.gray[400]} />
-            <Text style={styles.emptyStateText}>No notifications</Text>
-            <Text style={styles.emptyStateSubtext}>
-              You'll see order updates and important messages here
-            </Text>
-          </View>
-        ) : (
-          notifications.map((notification) => {
-            const isUnread = notification.is_read === 0;
-            const iconColor = getNotificationColor(notification.type, notification.status);
-            const isLiveNotification = liveNotifications.some(n => n.id === notification.id);
-
-            return (
-              <TouchableOpacity
-                key={notification.id}
-                style={[
-                  styles.notificationCard,
-                  isUnread && styles.notificationCardUnread,
-                  isLiveNotification && styles.liveNotification,
-                ]}
-                onPress={() => {
-                  if (isUnread) {
-                    markAsRead(notification.id);
-                  }
-                  // Don't navigate away or remove the notification
-                  // Keep it visible like client system
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={styles.notificationHeader}>
-                  <View
-                    style={[
-                      styles.iconContainer,
-                      { backgroundColor: `${iconColor}20` },
-                    ]}
-                  >
-                    <Ionicons
-                      name={getNotificationIcon(notification.type, notification.status) as any}
-                      size={24}
-                      color={iconColor}
-                    />
-                    {isLiveNotification && (
-                      <View style={styles.liveIndicator} />
-                    )}
-                  </View>
-                  <View style={styles.notificationContent}>
-                    <View style={styles.notificationTitleRow}>
-                      <Text style={styles.notificationTitle}>
-                        {notification.title}
-                      </Text>
-                      {isUnread && <View style={styles.unreadDot} />}
-                    </View>
-                    <Text style={styles.notificationMessage}>
-                      {notification.message}
-                    </Text>
-                    {notification.order_number && (
-                      <Text style={styles.notificationOrder}>
-                        Order #{notification.order_number}
-                      </Text>
-                    )}
-                    {notification.customer_name && (
-                      <Text style={styles.notificationCustomer}>
-                        Customer: {notification.customer_name}
-                      </Text>
-                    )}
-                    <View style={styles.notificationFooter}>
-                      <Text style={styles.notificationTime}>
-                        {formatDate(notification.created_at)}
-                      </Text>
-                      {isLiveNotification && (
-                        <View style={styles.liveBadge}>
-                          <Text style={styles.liveBadgeText}>Live</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </ScrollView>
-    </View>
+        maxToRenderPerBatch={10}
+        windowSize={5}
+      />
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F8FAFC',
   },
   header: {
     paddingHorizontal: 20,
     paddingBottom: 20,
-    paddingTop: 10,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  headerContent: {
+  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
-  headerRight: {
+  headerLeft: {
+    flex: 1,
+  },
+  headerMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    marginTop: 4,
+    gap: 8,
   },
-  notificationIconContainer: {
-    position: 'relative',
+  headerTitle: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
   },
-  badge: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: 'red',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  badgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
+  headerSubtitle: {
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: '500',
   },
   markAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 30,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   markAllText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
-  connectionStatus: {
+  connectionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 16,
     gap: 6,
   },
   connectionDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  connectionText: {
-    fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  reconnectText: {
-    fontSize: 11,
-    color: '#FFD700',
-    fontWeight: '600',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  emptyStateText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text.primary,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-  },
-  notificationCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: 'transparent',
-  },
-  notificationCardUnread: {
-    borderLeftColor: Colors.primary,
-    backgroundColor: Colors.primaryMuted,
-  },
-  liveNotification: {
-    borderWidth: 1,
-    borderColor: `${Colors.primary}33`,
-  },
-  notificationHeader: {
-    flexDirection: 'row',
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    position: 'relative',
-  },
-  liveIndicator: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FF3B30',
   },
-  notificationContent: {
+  connectionText: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  connectionIcon: {
+    marginLeft: 2,
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 32,
+    flexGrow: 1,
+  },
+  cardTouchable: {
+    marginBottom: 12,
+  },
+  card: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.03)',
+  },
+  cardUnread: {
+    backgroundColor: '#F0FDF4', // Light green tint for unread
+    borderColor: Colors.primary,
+    borderWidth: 1,
+  },
+  cardLive: {
+    shadowColor: Colors.primary,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  typeDot: {
+    width: 4,
+    height: '100%',
+    borderRadius: 2,
+    marginRight: 14,
+    alignSelf: 'stretch',
+  },
+  cardContent: {
     flex: 1,
+    marginRight: 12,
   },
-  notificationTitleRow: {
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E293B',
+    flex: 1,
+    marginRight: 8,
+  },
+  cardTime: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  cardMessage: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  cardMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  notificationTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
-    flex: 1,
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
+    fontSize: 13,
+    color: '#334155',
+    fontWeight: '500',
+  },
+  cardRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.primary,
-  },
-  notificationMessage: {
-    fontSize: 14,
-    color: Colors.text.secondary,
     marginBottom: 8,
-    lineHeight: 20,
   },
-  notificationOrder: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.primary,
-    marginBottom: 4,
-  },
-  notificationCustomer: {
-    fontSize: 13,
-    color: Colors.text.secondary,
-    marginBottom: 4,
-  },
-  notificationFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: Colors.text.secondary,
-  },
-  liveBadge: {
-    backgroundColor: `${Colors.primary}1A`,
+  liveChip: {
+    backgroundColor: `${Colors.primary}15`,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${Colors.primary}30`,
   },
-  liveBadgeText: {
+  liveChipText: {
     fontSize: 10,
     color: Colors.primary,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  skeletonContainer: {
+    padding: 16,
+    gap: 12,
+  },
+  skeletonCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+  },
+  skeletonDot: {
+    width: 4,
+    height: '100%',
+    backgroundColor: '#E2E8F0',
+    borderRadius: 2,
+    marginRight: 14,
+  },
+  skeletonContent: {
+    flex: 1,
+  },
+  skeletonHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  skeletonTitle: {
+    width: '60%',
+    height: 16,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+  },
+  skeletonTime: {
+    width: 40,
+    height: 16,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+  },
+  skeletonMessage: {
+    width: '90%',
+    height: 14,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  skeletonMeta: {
+    width: '50%',
+    height: 12,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: `${Colors.primary}10`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 8,
+  },
+  emptyMessage: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 250,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  emptyButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  errorIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: `${Colors.error}10`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 250,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  errorButton: {
+    backgroundColor: Colors.error,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    shadowColor: Colors.error,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  errorButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

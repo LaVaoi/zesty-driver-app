@@ -39,6 +39,134 @@ interface DeliveryMan {
   created_at: string;
 }
 
+// ===================== UI Components =====================
+const StatCard = ({ icon, value, label, color }: { icon: string; value: string | number; label: string; color?: string }) => (
+  <View style={styles.statCard}>
+    <View style={[styles.statIconContainer, color && { backgroundColor: color + '20' }]}>
+      <Ionicons name={icon as any} size={24} color={color || Colors.primary} />
+    </View>
+    <Text style={styles.statValue}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+);
+
+const SectionCard = ({ children, title, icon }: { children: React.ReactNode; title: string; icon?: string }) => (
+  <View style={styles.sectionCard}>
+    {title && (
+      <View style={styles.sectionHeader}>
+        {icon && <Ionicons name={icon as any} size={20} color={Colors.primary} style={styles.sectionIcon} />}
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+    )}
+    <View style={styles.sectionContent}>{children}</View>
+  </View>
+);
+
+const InfoRow = ({
+  icon,
+  label,
+  value,
+  editable = false,
+  onChangeText,
+  inputType = 'text',
+  options,
+  isLast = false,
+}: {
+  icon: string;
+  label: string;
+  value: string | number | null;
+  editable?: boolean;
+  onChangeText?: (text: string) => void;
+  inputType?: 'text' | 'select';
+  options?: string[];
+  isLast?: boolean;
+}) => {
+  if (editable && inputType === 'select' && options) {
+    return (
+      <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
+        <View style={styles.infoIconContainer}>
+          <Ionicons name={icon as any} size={20} color={Colors.primary} />
+        </View>
+        <View style={styles.infoContent}>
+          <Text style={styles.infoLabel}>{label}</Text>
+          <View style={styles.selectContainer}>
+            {options.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.selectOption,
+                  value === option && styles.selectOptionActive,
+                ]}
+                onPress={() => onChangeText?.(option)}
+              >
+                <Text
+                  style={[
+                    styles.selectOptionText,
+                    value === option && styles.selectOptionTextActive,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (editable) {
+    return (
+      <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
+        <View style={styles.infoIconContainer}>
+          <Ionicons name={icon as any} size={20} color={Colors.primary} />
+        </View>
+        <View style={styles.infoContent}>
+          <Text style={styles.infoLabel}>{label}</Text>
+          <TextInput
+            style={styles.input}
+            value={value?.toString() || ''}
+            onChangeText={onChangeText}
+            placeholder={`Enter ${label.toLowerCase()}`}
+            placeholderTextColor="#9CA3AF"
+          />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
+      <View style={styles.infoIconContainer}>
+        <Ionicons name={icon as any} size={20} color={Colors.primary} />
+      </View>
+      <View style={styles.infoContent}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue}>
+          {value || 'Not available'}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+const VerificationBadge = ({ status }: { status: 'verified' | 'pending' | 'missing' }) => {
+  const config = {
+    verified: { icon: 'checkmark-circle', color: '#10B981', text: 'Verified' },
+    pending: { icon: 'time', color: Colors.orange, text: 'Pending' },
+    missing: { icon: 'alert-circle', color: '#EF4444', text: 'Missing' },
+  };
+  const { icon, color, text } = config[status];
+
+  return (
+    <View style={[styles.verificationBadge, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon as any} size={14} color={color} />
+      <Text style={[styles.verificationText, { color }]}>{text}</Text>
+    </View>
+  );
+};
+
+// ===================== Main Screen =====================
 const ProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -348,91 +476,6 @@ const ProfileScreen: React.FC = () => {
     }
   };
 
-  const InfoRow = ({
-    icon,
-    label,
-    value,
-    editable = false,
-    onChangeText,
-    inputType = 'text',
-    options,
-  }: {
-    icon: string;
-    label: string;
-    value: string | number | null;
-    editable?: boolean;
-    onChangeText?: (text: string) => void;
-    inputType?: 'text' | 'select';
-    options?: string[];
-  }) => {
-    if (editable && isEditing) {
-      if (inputType === 'select' && options) {
-        return (
-          <View style={styles.infoRow}>
-            <View style={styles.infoIconContainer}>
-              <Ionicons name={icon as any} size={20} color={Colors.primary} />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{label}</Text>
-              <View style={styles.selectContainer}>
-                {options.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.selectOption,
-                      formData.vehicle_type === option && styles.selectOptionActive,
-                    ]}
-                    onPress={() => onChangeText?.(option)}
-                  >
-                    <Text
-                      style={[
-                        styles.selectOptionText,
-                        formData.vehicle_type === option && styles.selectOptionTextActive,
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-        );
-      }
-      return (
-        <View style={styles.infoRow}>
-          <View style={styles.infoIconContainer}>
-            <Ionicons name={icon as any} size={20} color={Colors.primary} />
-          </View>
-          <View style={styles.infoContent}>
-            <Text style={styles.infoLabel}>{label}</Text>
-            <TextInput
-              style={styles.input}
-              value={value?.toString() || ''}
-              onChangeText={onChangeText}
-              placeholder={`Enter ${label.toLowerCase()}`}
-              placeholderTextColor={Colors.text.secondary}
-            />
-          </View>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.infoRow}>
-        <View style={styles.infoIconContainer}>
-          <Ionicons name={icon as any} size={20} color={Colors.primary} />
-        </View>
-        <View style={styles.infoContent}>
-          <Text style={styles.infoLabel}>{label}</Text>
-          <Text style={styles.infoValue}>
-            {value || 'Not available'}
-          </Text>
-        </View>
-      </View>
-    );
-  };
-
   const renderSkeleton = () => (
     <ScrollView
       style={styles.scrollView}
@@ -440,16 +483,17 @@ const ProfileScreen: React.FC = () => {
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.profileHeader}>
-        <Skeleton width={100} height={100} borderRadius={50} />
-        <Skeleton width={150} height={20} borderRadius={4} style={{ marginTop: 16 }} />
-        <Skeleton width={200} height={14} borderRadius={4} style={{ marginTop: 8 }} />
+        <Skeleton width={120} height={120} borderRadius={60} />
+        <Skeleton width={180} height={24} borderRadius={4} style={{ marginTop: 16 }} />
+        <Skeleton width={140} height={16} borderRadius={4} style={{ marginTop: 8 }} />
       </View>
-      <View style={styles.section}>
-        <Skeleton width="100%" height={60} borderRadius={12} style={{ marginBottom: 12 }} />
-        <Skeleton width="100%" height={60} borderRadius={12} style={{ marginBottom: 12 }} />
-        <Skeleton width="100%" height={60} borderRadius={12} style={{ marginBottom: 12 }} />
-        <Skeleton width="100%" height={60} borderRadius={12} />
+      <View style={styles.statsGrid}>
+        <Skeleton width="31%" height={90} borderRadius={16} />
+        <Skeleton width="31%" height={90} borderRadius={16} />
+        <Skeleton width="31%" height={90} borderRadius={16} />
       </View>
+      <Skeleton width="100%" height={200} borderRadius={20} style={{ marginBottom: 16 }} />
+      <Skeleton width="100%" height={160} borderRadius={20} style={{ marginBottom: 16 }} />
     </ScrollView>
   );
 
@@ -458,14 +502,13 @@ const ProfileScreen: React.FC = () => {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <LinearGradient
           colors={[Colors.dark, Colors.darkLight]}
-          style={styles.header}
+          style={styles.headerGradient}
         >
           <View style={styles.headerContent}>
-            <View>
-              <Text style={styles.headerTitle}>Profile</Text>
-              <Text style={styles.headerSubtitle}>Loading...</Text>
+            <Text style={styles.headerTitle}>Profile</Text>
+            <View style={styles.headerActions}>
+              <View style={styles.skeletonHeaderIcon} />
             </View>
-            <Ionicons name="person" size={32} color="#fff" />
           </View>
         </LinearGradient>
         {renderSkeleton()}
@@ -489,21 +532,26 @@ const ProfileScreen: React.FC = () => {
       : `https://ubua.cloud/uploads/deliveryManImages/${image.replace(/\\/g, '/')}`
     : null;
 
+  // Mock data for demonstration - replace with actual data when available
+  const todayEarnings = "$124.50";
+  const totalDeliveries = "48";
+  const rating = "4.8";
+
+  // Document status (mock - replace with actual logic)
+  const documentStatus: 'verified' | 'pending' | 'missing' = 'verified';
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <LinearGradient
         colors={[Colors.dark, Colors.darkLight]}
-        style={styles.header}
+        style={styles.headerGradient}
       >
         <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.headerTitle}>Profile</Text>
-            <Text style={styles.headerSubtitle}>Delivery Partner</Text>
-          </View>
+          <Text style={styles.headerTitle}>Profile</Text>
           <View style={styles.headerActions}>
             {!isEditing ? (
-              <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.editButton}>
-                <Ionicons name="create-outline" size={24} color="#fff" />
+              <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.headerButton}>
+                <Ionicons name="create-outline" size={22} color="#fff" />
               </TouchableOpacity>
             ) : (
               <>
@@ -512,64 +560,73 @@ const ProfileScreen: React.FC = () => {
                     setIsEditing(false);
                     fetchProfile();
                   }}
-                  style={styles.cancelButton}
+                  style={styles.headerButton}
                 >
-                  <Ionicons name="close" size={24} color="#fff" />
+                  <Ionicons name="close" size={22} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleSave}
-                  style={styles.saveButton}
+                  style={[styles.headerButton, styles.headerButtonPrimary]}
                   disabled={saving}
                 >
                   {saving ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Ionicons name="checkmark" size={24} color="#fff" />
+                    <Ionicons name="checkmark" size={22} color="#fff" />
                   )}
                 </TouchableOpacity>
               </>
             )}
-            <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-              <Ionicons name="log-out-outline" size={24} color="#fff" />
-            </TouchableOpacity>
           </View>
         </View>
       </LinearGradient>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Profile Header */}
-        <View style={styles.profileHeader}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Profile Identity Section */}
+        <View style={styles.identitySection}>
           <TouchableOpacity
             onPress={() => isEditing && setAvatarModalVisible(true)}
             disabled={!isEditing}
             activeOpacity={isEditing ? 0.7 : 1}
           >
-            <View style={styles.avatarContainer}>
+            <View style={styles.avatarLargeContainer}>
               {displayImage ? (
-                <Image source={{ uri: displayImage }} style={styles.avatarImage} />
+                <Image source={{ uri: displayImage }} style={styles.avatarLargeImage} />
               ) : (
                 <LinearGradient
-                  colors={[Colors.dark, Colors.darkLight]}
-                  style={styles.avatarGradient}
+                  colors={[Colors.primary, Colors.orange]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.avatarLargeGradient}
                 >
-                  <Ionicons name="person" size={48} color="#fff" />
+                  <Text style={styles.avatarInitials}>
+                    {deliveryMan.name?.charAt(0).toUpperCase() || 'D'}
+                  </Text>
                 </LinearGradient>
               )}
               {isEditing && (
-                <View style={styles.editAvatarBadge}>
-                  <Ionicons name="camera" size={20} color="#fff" />
+                <View style={styles.editAvatarLargeBadge}>
+                  <Ionicons name="camera" size={18} color="#fff" />
                 </View>
               )}
             </View>
           </TouchableOpacity>
+
           {!isEditing ? (
             <>
-              <Text style={styles.profileName}>{deliveryMan.name}</Text>
+              <Text style={styles.identityName}>{deliveryMan.name}</Text>
+              <Text style={styles.identitySubtitle}>
+                {deliveryMan.email} • ID: {deliveryMan.id}
+              </Text>
               <View style={styles.statusBadge}>
                 <View
                   style={[
                     styles.statusDot,
-                    { backgroundColor: deliveryMan.is_active ? Colors.success : Colors.error },
+                    { backgroundColor: deliveryMan.is_active ? '#10B981' : '#EF4444' },
                   ]}
                 />
                 <Text style={styles.statusText}>
@@ -578,119 +635,128 @@ const ProfileScreen: React.FC = () => {
               </View>
             </>
           ) : (
-            <Text style={styles.profileName}>Edit Profile</Text>
+            <Text style={styles.identityName}>Edit Profile</Text>
           )}
         </View>
 
-        {/* Profile Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Personal Information</Text>
-          <View style={styles.infoCard}>
-            <InfoRow
-              icon="person-outline"
-              label="Name"
-              value={isEditing ? formData.name : deliveryMan.name}
-              editable={isEditing}
-              onChangeText={(text) => setFormData({ ...formData, name: text })}
-            />
-            <InfoRow
-              icon="mail-outline"
-              label="Email"
-              value={isEditing ? formData.email : deliveryMan.email}
-              editable={isEditing}
-              onChangeText={(text) => setFormData({ ...formData, email: text })}
-            />
-            <InfoRow
-              icon="call-outline"
-              label="Phone"
-              value={isEditing ? formData.phone : deliveryMan.phone}
-              editable={isEditing}
-              onChangeText={(text) => setFormData({ ...formData, phone: text })}
-            />
+        {/* Performance Snapshot */}
+        {!isEditing && (
+          <View style={styles.statsGrid}>
+            <StatCard icon="cash-outline" value={todayEarnings} label="Today's Earnings" color="#10B981" />
+            <StatCard icon="cube-outline" value={totalDeliveries} label="Deliveries" color={Colors.primary} />
+            <StatCard icon="star-outline" value={rating} label="Rating" color="#F59E0B" />
           </View>
-        </View>
+        )}
+
+        {/* Personal Information */}
+        <SectionCard title="Personal Information" icon="person-outline">
+          <InfoRow
+            icon="person-outline"
+            label="Full Name"
+            value={isEditing ? formData.name : deliveryMan.name}
+            editable={isEditing}
+            onChangeText={(text) => setFormData({ ...formData, name: text })}
+          />
+          <InfoRow
+            icon="mail-outline"
+            label="Email Address"
+            value={isEditing ? formData.email : deliveryMan.email}
+            editable={isEditing}
+            onChangeText={(text) => setFormData({ ...formData, email: text })}
+          />
+          <InfoRow
+            icon="call-outline"
+            label="Phone Number"
+            value={isEditing ? formData.phone : deliveryMan.phone}
+            editable={isEditing}
+            onChangeText={(text) => setFormData({ ...formData, phone: text })}
+            isLast
+          />
+        </SectionCard>
 
         {/* Vehicle Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Vehicle Information</Text>
-          <View style={styles.infoCard}>
-            <InfoRow
-              icon="bicycle-outline"
-              label="Vehicle Type"
-              value={isEditing ? formData.vehicle_type : deliveryMan.vehicle_type}
-              editable={isEditing}
-              onChangeText={(text) => setFormData({ ...formData, vehicle_type: text })}
-              inputType="select"
-              options={vehicleTypes}
-            />
-            <InfoRow
-              icon="card-outline"
-              label="License Number"
-              value={isEditing ? formData.license_number : deliveryMan.license_number}
-              editable={isEditing}
-              onChangeText={(text) => setFormData({ ...formData, license_number: text })}
-            />
-          </View>
-        </View>
+        <SectionCard title="Vehicle Information" icon="car-outline">
+          <InfoRow
+            icon="bicycle-outline"
+            label="Vehicle Type"
+            value={isEditing ? formData.vehicle_type : deliveryMan.vehicle_type}
+            editable={isEditing}
+            onChangeText={(text) => setFormData({ ...formData, vehicle_type: text })}
+            inputType="select"
+            options={vehicleTypes}
+          />
+          <InfoRow
+            icon="card-outline"
+            label="License / Plate"
+            value={isEditing ? formData.license_number : deliveryMan.license_number}
+            editable={isEditing}
+            onChangeText={(text) => setFormData({ ...formData, license_number: text })}
+            isLast
+          />
+        </SectionCard>
 
-        {/* Location Information */}
+        {/* Verification Status */}
         {!isEditing && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <View style={styles.infoCard}>
-              <InfoRow
-                icon="location-outline"
-                label="Last Update"
-                value={
-                  deliveryMan.last_location_update
-                    ? new Date(deliveryMan.last_location_update).toLocaleString()
-                    : 'Never'
-                }
-              />
-              {deliveryMan.current_latitude && deliveryMan.current_longitude ? (
-                <>
-                  <InfoRow
-                    icon="navigate-outline"
-                    label="Latitude"
-                    value={(Number(deliveryMan.current_latitude) || 0).toFixed(6)}
-                  />
-                  <InfoRow
-                    icon="navigate-outline"
-                    label="Longitude"
-                    value={(Number(deliveryMan.current_longitude) || 0).toFixed(6)}
-                  />
-                </>
-              ) : (
-                <Text style={styles.noLocationText}>Location not available</Text>
-              )}
+          <SectionCard title="Verification" icon="shield-checkmark-outline">
+            <View style={styles.verificationRow}>
+              <View style={styles.verificationLeft}>
+                <Ionicons name="document-text-outline" size={20} color={Colors.primary} />
+                <Text style={styles.verificationLabel}>Documents</Text>
+              </View>
+              <VerificationBadge status={documentStatus} />
             </View>
-          </View>
+            <View style={[styles.verificationRow, styles.verificationRowLast]}>
+              <View style={styles.verificationLeft}>
+                <Ionicons name="person-outline" size={20} color={Colors.primary} />
+                <Text style={styles.verificationLabel}>Identity</Text>
+              </View>
+              <VerificationBadge status="verified" />
+            </View>
+          </SectionCard>
         )}
 
-        {/* Account Information */}
-        {!isEditing && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Account</Text>
-            <View style={styles.infoCard}>
-              <InfoRow
-                icon="calendar-outline"
-                label="Member Since"
-                value={new Date(deliveryMan.created_at).toLocaleDateString()}
-              />
+        {/* Location Information (Collapsed for cleaner UI) */}
+        {!isEditing && deliveryMan.current_latitude && deliveryMan.current_longitude && (
+          <SectionCard title="Current Location" icon="location-outline">
+            <View style={styles.locationRow}>
+              <Ionicons name="navigate-outline" size={16} color={Colors.text.secondary} />
+              <Text style={styles.locationText}>
+                {Number(deliveryMan.current_latitude).toFixed(6)}, {Number(deliveryMan.current_longitude).toFixed(6)}
+              </Text>
             </View>
-          </View>
+            <View style={styles.locationRow}>
+              <Ionicons name="time-outline" size={16} color={Colors.text.secondary} />
+              <Text style={styles.locationText}>
+                Updated {deliveryMan.last_location_update
+                  ? new Date(deliveryMan.last_location_update).toLocaleTimeString()
+                  : 'Never'}
+              </Text>
+            </View>
+          </SectionCard>
         )}
 
-        {/* Logout Button */}
+        {/* Action Buttons */}
         {!isEditing && (
-          <TouchableOpacity
-            style={styles.logoutButtonCard}
-            onPress={handleLogout}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="log-out-outline" size={20} color={Colors.error} />
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
+          <View style={styles.actionsContainer}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => Alert.alert('Coming Soon', 'Documents view')}>
+              <Ionicons name="document-text-outline" size={20} color={Colors.primary} />
+              <Text style={styles.actionButtonText}>View Documents</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionButton} onPress={() => Alert.alert('Coming Soon', 'Change password')}>
+              <Ionicons name="lock-closed-outline" size={20} color={Colors.primary} />
+              <Text style={styles.actionButtonText}>Change Password</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, styles.logoutButton]}
+              onPress={handleLogout}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+              <Text style={[styles.actionButtonText, styles.logoutButtonText]}>Logout</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </ScrollView>
 
@@ -723,8 +789,8 @@ const ProfileScreen: React.FC = () => {
                 style={[styles.modalOption, styles.modalOptionDanger]}
                 onPress={removeImage}
               >
-                <Ionicons name="trash-outline" size={24} color={Colors.error} />
-                <Text style={[styles.modalOptionText, { color: Colors.error }]}>
+                <Ionicons name="trash-outline" size={24} color="#EF4444" />
+                <Text style={[styles.modalOptionText, { color: '#EF4444' }]}>
                   Remove Photo
                 </Text>
               </TouchableOpacity>
@@ -745,50 +811,54 @@ const ProfileScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F5F7FA',
   },
-  header: {
+  headerGradient: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 24,
     paddingTop: 10,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.5,
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
+  headerButtonPrimary: {
+    backgroundColor: Colors.primary,
   },
-  editButton: {
-    padding: 8,
-  },
-  cancelButton: {
-    padding: 8,
-  },
-  saveButton: {
-    padding: 8,
-  },
-  logoutButton: {
-    padding: 8,
+  skeletonHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 32,
   },
   loadingContainer: {
     flex: 1,
@@ -800,96 +870,166 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text.secondary,
   },
-  profileHeader: {
+  identitySection: {
     alignItems: 'center',
     marginBottom: 24,
   },
-  avatarContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 12,
+  avatarLargeContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 16,
     position: 'relative',
     overflow: 'hidden',
+    borderWidth: 4,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  avatarImage: {
+  avatarLargeImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 50,
   },
-  avatarGradient: {
+  avatarLargeGradient: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  editAvatarBadge: {
+  avatarInitials: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  editAvatarLargeBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
     backgroundColor: Colors.primary,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: '#fff',
   },
-  profileName: {
+  identityName: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginBottom: 8,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 4,
+    letterSpacing: -0.5,
+  },
+  identitySubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 12,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primaryMuted,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: 6,
+    marginRight: 8,
   },
   statusText: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1F2937',
   },
-  section: {
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 24,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginBottom: 12,
-  },
-  infoCard: {
+  statCard: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
+    marginHorizontal: 4,
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
+  },
+  statIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  sectionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    overflow: 'hidden',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  sectionIcon: {
+    marginRight: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+    letterSpacing: -0.3,
+  },
+  sectionContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   infoRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  infoRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   infoIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primaryMuted,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -899,21 +1039,20 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 12,
-    color: Colors.text.secondary,
-    marginBottom: 4,
+    color: '#6B7280',
+    marginBottom: 2,
   },
   infoValue: {
     fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text.primary,
+    fontWeight: '500',
+    color: '#1F2937',
   },
   input: {
     fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text.primary,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    fontWeight: '500',
+    color: '#1F2937',
     paddingVertical: 4,
+    paddingHorizontal: 0,
   },
   selectContainer: {
     flexDirection: 'row',
@@ -922,9 +1061,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   selectOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     backgroundColor: '#F3F4F6',
     borderWidth: 1,
     borderColor: '#E5E7EB',
@@ -936,38 +1075,82 @@ const styles = StyleSheet.create({
   selectOptionText: {
     fontSize: 14,
     fontWeight: '500',
-    color: Colors.text.primary,
+    color: '#1F2937',
   },
   selectOptionTextActive: {
     color: '#fff',
   },
-  noLocationText: {
-    fontSize: 14,
-    color: Colors.text.secondary,
-    fontStyle: 'italic',
-    marginLeft: 52,
-  },
-  logoutButtonCard: {
+  verificationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  verificationRowLast: {
+    borderBottomWidth: 0,
+  },
+  verificationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  verificationLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1F2937',
+  },
+  verificationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  verificationText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 8,
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#4B5563',
+  },
+  actionsContainer: {
+    marginTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: Colors.error,
+    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
   },
-  logoutButtonText: {
+  actionButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: Colors.error,
-    marginLeft: 8,
+    fontWeight: '500',
+    color: '#1F2937',
+    marginLeft: 12,
+  },
+  logoutButton: {
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+  },
+  logoutButtonText: {
+    color: '#EF4444',
   },
   modalOverlay: {
     flex: 1,
@@ -976,23 +1159,24 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     paddingBottom: 40,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
+    fontWeight: '700',
+    color: '#1F2937',
     marginBottom: 20,
     textAlign: 'center',
+    letterSpacing: -0.5,
   },
   modalOption: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     backgroundColor: '#F9FAFB',
     marginBottom: 12,
   },
@@ -1002,7 +1186,7 @@ const styles = StyleSheet.create({
   modalOptionText: {
     fontSize: 16,
     fontWeight: '500',
-    color: Colors.text.primary,
+    color: '#1F2937',
     marginLeft: 12,
   },
   modalCancel: {
@@ -1013,7 +1197,7 @@ const styles = StyleSheet.create({
   modalCancelText: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.secondary,
+    color: '#6B7280',
   },
 });
 

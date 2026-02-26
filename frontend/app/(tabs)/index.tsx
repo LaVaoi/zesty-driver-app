@@ -8,7 +8,9 @@ import {
   ActivityIndicator,
   Platform,
   TouchableOpacity,
-  Modal
+  Modal,
+  StatusBar,
+  Dimensions
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +21,8 @@ import * as Location from 'expo-location';
 import Colors from '@/constants/Colors';
 import { Skeleton, StatsCardSkeleton } from '@/components/ui/skeleton';
 import { realtimeService } from '../services/realtimeService';
+
+const { width } = Dimensions.get('window');
 
 interface Metrics {
   // Order Statistics
@@ -277,8 +281,8 @@ const DashboardScreen: React.FC = () => {
     suffix?: string;
   }) => (
     <View style={[styles.statCard, { borderTopColor: color }]}>
-      <View style={[styles.iconContainer, { backgroundColor: color }]}>
-        <Ionicons name={icon as any} size={20} color="#fff" />
+      <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
+        <Ionicons name={icon as any} size={20} color={color} />
       </View>
       <Text style={styles.statValue}>{value}{suffix}</Text>
       <Text style={styles.statLabel}>{title}</Text>
@@ -497,13 +501,20 @@ const DashboardScreen: React.FC = () => {
   if (loading && !metrics) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0B2B1E" />
         <LinearGradient
-          colors={[Colors.dark, Colors.darkLight]}
-          style={styles.header}
+          colors={['#0B2B1E', '#1A4A33']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
         >
           <View style={styles.headerContent}>
             <View>
-              <Text style={styles.headerTitle}>Dashboard</Text>
+              <View style={styles.welcomeChip}>
+                <Ionicons name="flash" size={16} color="#FFA500" />
+                <Text style={styles.welcomeChipText}>DRIVER DASHBOARD</Text>
+              </View>
+              <Text style={styles.headerTitle}>Loading performance...</Text>
               <Text style={styles.headerSubtitle}>
                 {new Date().toLocaleDateString('en-US', {
                   weekday: 'long',
@@ -512,7 +523,9 @@ const DashboardScreen: React.FC = () => {
                 })}
               </Text>
             </View>
-            <Ionicons name="stats-chart" size={32} color="#fff" />
+            <View style={styles.loadingCircle}>
+              <ActivityIndicator size="large" color="#FFA500" />
+            </View>
           </View>
         </LinearGradient>
         {renderSkeleton()}
@@ -523,34 +536,34 @@ const DashboardScreen: React.FC = () => {
   if (error && !metrics) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0B2B1E" />
         <LinearGradient
-          colors={[Colors.dark, Colors.darkLight]}
-          style={styles.header}
+          colors={['#0B2B1E', '#1A4A33']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
         >
           <View style={styles.headerContent}>
             <View>
-              <Text style={styles.headerTitle}>Dashboard</Text>
-              <Text style={styles.headerSubtitle}>
-                {new Date().toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                })}
-              </Text>
+              <Text style={styles.headerTitle}>Connection Error</Text>
+              <Text style={styles.headerSubtitle}>Unable to load dashboard</Text>
             </View>
-            <Ionicons name="stats-chart" size={32} color="#fff" />
+            <Ionicons name="warning" size={32} color="#FFA500" />
           </View>
         </LinearGradient>
         <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color={Colors.text.secondary} />
+          <View style={styles.errorIconContainer}>
+            <Ionicons name="cloud-offline-outline" size={48} color="#FFA500" />
+          </View>
+          <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={fetchMetrics}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
-            <Ionicons name="refresh" size={20} color={Colors.dark} />
-            <Text style={styles.retryButtonText}>Retry</Text>
+            <Ionicons name="refresh" size={20} color="#0B2B1E" />
+            <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -559,13 +572,24 @@ const DashboardScreen: React.FC = () => {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#0B2B1E" />
       <LinearGradient
-        colors={[Colors.dark, Colors.darkLight]}
-        style={styles.header}
+        colors={['#0B2B1E', '#1A4A33']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
       >
         <View style={styles.headerContent}>
           <View>
-            <Text style={styles.headerTitle}>{driverName ? `Hey, ${driverName}` : 'Dashboard'}</Text>
+            <View style={styles.welcomeChip}>
+              <Ionicons name="flash" size={16} color="#FFA500" />
+              <Text style={styles.welcomeChipText}>
+                {driverName ? `WELCOME BACK, ${driverName.toUpperCase()}` : 'DRIVER DASHBOARD'}
+              </Text>
+            </View>
+            <Text style={styles.headerTitle}>
+              {driverName ? `${driverName}'s Route` : 'Your Route'}
+            </Text>
             <Text style={styles.headerSubtitle}>
               {new Date().toLocaleDateString('en-US', {
                 weekday: 'long',
@@ -577,8 +601,9 @@ const DashboardScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.chartButton}
             onPress={() => setShowAnalysisModal(true)}
+            activeOpacity={0.8}
           >
-            <Ionicons name="stats-chart" size={24} color={Colors.primary} />
+            <Ionicons name="stats-chart" size={24} color="#FFA500" />
           </TouchableOpacity>
         </View>
       </LinearGradient>
@@ -587,7 +612,12 @@ const DashboardScreen: React.FC = () => {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#FFA500"
+            colors={['#FFA500']}
+          />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -638,7 +668,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Lifetime Performance Overview */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📊 Lifetime Performance</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="trophy" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Lifetime Performance</Text>
+              </View>
 
               <OrderStatusCard
                 title="Overall Order Status"
@@ -652,7 +685,7 @@ const DashboardScreen: React.FC = () => {
               />
 
               <EarningsBreakdownCard
-                title="💰 Lifetime Earnings Analysis"
+                title="Lifetime Earnings Analysis"
                 totalEarnings={metrics.totalEarnings}
                 deliveryFees={metrics.totalDeliveryFees}
                 orderRevenue={metrics.totalOrderRevenue}
@@ -663,7 +696,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Today's Performance - Simplified */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📅 Today's Performance</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="sunny" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Today's Performance</Text>
+              </View>
 
               {/* Compact Today's Stats */}
               <View style={styles.compactStatsCard}>
@@ -716,7 +752,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Yesterday's Performance - Simplified */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📆 Yesterday's Performance</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="moon" size={20} color="#8E8E93" />
+                <Text style={styles.sectionTitle}>Yesterday's Performance</Text>
+              </View>
 
               {/* Compact Yesterday's Stats */}
               <View style={styles.compactStatsCard}>
@@ -769,7 +808,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Weekly Summary */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📈 This Week Summary</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="calendar" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>This Week Summary</Text>
+              </View>
 
               <OrderStatusCard
                 title="This Week's Orders"
@@ -838,7 +880,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Performance Insights */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>💡 Performance Insights</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="bulb" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Performance Insights</Text>
+              </View>
               <View style={styles.insightsCard}>
                 <View style={styles.insightItem}>
                   <View style={[styles.insightIcon, { backgroundColor: '#34C759' }]}>
@@ -897,13 +942,19 @@ const DashboardScreen: React.FC = () => {
       >
         <View style={[styles.container, { paddingTop: insets.top }]}>
           <LinearGradient
-            colors={[Colors.dark, Colors.darkLight]}
-            style={styles.header}
+            colors={['#0B2B1E', '#1A4A33']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.headerGradient}
           >
             <View style={styles.headerContent}>
               <View>
-                <Text style={styles.headerTitle}>📊 Data Analysis</Text>
-                <Text style={styles.headerSubtitle}>Performance Insights & Trends</Text>
+                <View style={styles.welcomeChip}>
+                  <Ionicons name="analytics" size={16} color="#FFA500" />
+                  <Text style={styles.welcomeChipText}>DEEP ANALYSIS</Text>
+                </View>
+                <Text style={styles.headerTitle}>Performance Insights</Text>
+                <Text style={styles.headerSubtitle}>Data-driven recommendations</Text>
               </View>
               <TouchableOpacity
                 style={styles.closeButton}
@@ -917,7 +968,10 @@ const DashboardScreen: React.FC = () => {
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             {/* Performance Trends with Charts */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📈 Performance Trends</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="trending-up" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Performance Trends</Text>
+              </View>
 
               {/* Daily Comparison Chart */}
               <View style={styles.chartCard}>
@@ -1127,7 +1181,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Efficiency Metrics with Circular Progress */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>⚡ Efficiency Metrics</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="speedometer" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Efficiency Metrics</Text>
+              </View>
 
               {/* Circular Progress Cards */}
               <View style={styles.progressRow}>
@@ -1204,7 +1261,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Weekly Performance with Enhanced Charts */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📅 Weekly Performance</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="calendar" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Weekly Performance</Text>
+              </View>
 
               {/* Weekly Trend Curve */}
               <View style={styles.curveCard}>
@@ -1297,7 +1357,10 @@ const DashboardScreen: React.FC = () => {
 
             {/* Recommendations */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>💡 Recommendations</Text>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="bulb" size={20} color="#FFA500" />
+                <Text style={styles.sectionTitle}>Recommendations</Text>
+              </View>
 
               <View style={styles.analysisCard}>
                 {metrics.todayCancelled > metrics.yesterdayCancelled && (
@@ -1338,17 +1401,36 @@ const DashboardScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F5F7FA',
   },
-  header: {
+  headerGradient: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
-    paddingTop: 10,
+    paddingBottom: 24,
+    paddingTop: 16,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
   },
   headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  welcomeChip: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  welcomeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+    letterSpacing: 0.5,
   },
   headerTitle: {
     fontSize: 28,
@@ -1358,7 +1440,15 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  loadingCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollView: {
     flex: 1,
@@ -1372,26 +1462,51 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 32,
   },
+  errorIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(255,165,0,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
   errorText: {
     fontSize: 16,
-    color: Colors.text.secondary,
+    color: '#666',
     textAlign: 'center',
-    marginTop: 16,
     marginBottom: 24,
   },
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+    backgroundColor: '#FFA500',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 30,
     gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#FFA500',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
   },
   retryButtonText: {
-    color: Colors.dark,
+    color: '#0B2B1E',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1400,51 +1515,55 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   statCard: {
-    width: '48%',
+    width: (width - 44) / 2,
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 16,
-    marginBottom: 12,
     borderTopWidth: 3,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   iconContainer: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 13,
-    color: Colors.text.secondary,
+    fontSize: 12,
+    color: '#666',
     fontWeight: '500',
   },
   section: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginBottom: 12,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
   todayCard: {
     backgroundColor: '#fff',
@@ -1506,18 +1625,19 @@ const styles = StyleSheet.create({
   // Earnings Breakdown Card Styles
   earningsCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     borderTopWidth: 4,
+    marginTop: 12,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -1529,7 +1649,7 @@ const styles = StyleSheet.create({
   earningsTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginLeft: 8,
   },
   earningsTotal: {
@@ -1537,16 +1657,16 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F0F0F0',
   },
   earningsTotalValue: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   earningsTotalLabel: {
     fontSize: 13,
-    color: Colors.text.secondary,
+    color: '#666',
     marginTop: 4,
   },
   earningsBreakdown: {
@@ -1571,16 +1691,16 @@ const styles = StyleSheet.create({
   },
   earningsItemLabel: {
     fontSize: 14,
-    color: Colors.text.secondary,
+    color: '#666',
   },
   earningsItemValue: {
     fontSize: 15,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   earningsProgress: {
     height: 6,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#F0F0F0',
     borderRadius: 3,
     flexDirection: 'row',
     overflow: 'hidden',
@@ -1596,7 +1716,7 @@ const styles = StyleSheet.create({
   // Order Status Card Styles
   statusCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     borderTopWidth: 4,
     marginBottom: 16,
@@ -1604,11 +1724,11 @@ const styles = StyleSheet.create({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -1620,7 +1740,7 @@ const styles = StyleSheet.create({
   statusTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginLeft: 8,
   },
   statusGrid: {
@@ -1636,11 +1756,11 @@ const styles = StyleSheet.create({
   statusValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   statusLabel: {
     fontSize: 12,
-    color: Colors.text.secondary,
+    color: '#666',
     marginTop: 2,
   },
   completionBar: {
@@ -1734,17 +1854,17 @@ const styles = StyleSheet.create({
   },
   insightsCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -1758,17 +1878,17 @@ const styles = StyleSheet.create({
   },
   insightLabel: {
     fontSize: 13,
-    color: Colors.text.secondary,
+    color: '#666',
     marginBottom: 4,
   },
   insightValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   insightSubLabel: {
     fontSize: 12,
-    color: Colors.text.secondary,
+    color: '#666',
     marginTop: 2,
   },
   insightIcon: {
@@ -1780,7 +1900,7 @@ const styles = StyleSheet.create({
   },
   insightDivider: {
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#F0F0F0',
     marginVertical: 16,
   },
   // Daily Stats Grid Styles
@@ -1829,9 +1949,9 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   weeklyStatCard: {
-    width: '31%',
+    width: (width - 44) / 2,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     alignItems: 'center',
     borderTopWidth: 3,
@@ -1839,7 +1959,7 @@ const styles = StyleSheet.create({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 6,
       },
       android: {
@@ -1848,32 +1968,32 @@ const styles = StyleSheet.create({
     }),
   },
   weeklyStatValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginVertical: 8,
+    color: '#1A1A1A',
+    marginVertical: 6,
   },
   weeklyStatLabel: {
     fontSize: 11,
-    color: Colors.text.secondary,
+    color: '#666',
     textAlign: 'center',
     fontWeight: '500',
   },
   // Compact Stats Card Styles
   compactStatsCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -1885,7 +2005,7 @@ const styles = StyleSheet.create({
   compactStatsTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginLeft: 8,
   },
   compactStatsGrid: {
@@ -1898,14 +2018,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   compactStatValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginBottom: 4,
   },
   compactStatLabel: {
-    fontSize: 12,
-    color: Colors.text.secondary,
+    fontSize: 10,
+    color: '#666',
     fontWeight: '500',
   },
   compactEarningsRow: {
@@ -1913,49 +2033,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: '#F0F0F0',
   },
   compactEarningsText: {
     fontSize: 14,
-    color: Colors.text.secondary,
+    color: '#666',
     marginLeft: 8,
     flex: 1,
   },
   compactEarningsValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   // Chart Button Styles
   chartButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 20,
-    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 24,
+    padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 20,
-    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 24,
+    padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   // Analysis Modal Styles
   analysisCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -2057,33 +2177,33 @@ const styles = StyleSheet.create({
   recommendationText: {
     flex: 1,
     fontSize: 14,
-    color: Colors.text.primary,
+    color: '#1A1A1A',
     marginLeft: 12,
     lineHeight: 20,
   },
   // Chart Styles
   chartCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   chartTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
-    marginBottom: 20,
+    color: '#1A1A1A',
+    marginBottom: 16,
   },
   barChartContainer: {
     marginBottom: 16,
@@ -2091,18 +2211,18 @@ const styles = StyleSheet.create({
   barChartRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   barLabel: {
     width: 80,
-    fontSize: 14,
-    color: Colors.text.secondary,
+    fontSize: 13,
+    color: '#666',
     fontWeight: '500',
   },
   barTrack: {
     flex: 1,
     height: 24,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#F5F5F5',
     borderRadius: 12,
     marginHorizontal: 12,
     overflow: 'hidden',
@@ -2115,56 +2235,56 @@ const styles = StyleSheet.create({
   },
   barValue: {
     width: 60,
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1A1A1A',
     textAlign: 'right',
   },
   chartInsight: {
-    fontSize: 14,
-    color: Colors.text.secondary,
+    fontSize: 13,
+    color: '#666',
     textAlign: 'center',
     fontStyle: 'italic',
   },
   // Circular Progress Styles
   progressRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
     marginBottom: 16,
   },
   progressCard: {
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 16,
     alignItems: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   progressTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.text.primary,
-    marginBottom: 16,
+    color: '#1A1A1A',
+    marginBottom: 12,
   },
   circleContainer: {
     position: 'relative',
     marginBottom: 12,
   },
   circleBackground: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#F3F4F6',
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#F5F5F5',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -2174,37 +2294,37 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: '#34C759',
-    borderRadius: 40,
+    borderRadius: 35,
   },
   circleValue: {
     position: 'absolute',
-    top: 50,
+    top: 27,
     left: 0,
     right: 0,
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    color: Colors.text.primary,
+    color: '#1A1A1A',
   },
   progressSubtitle: {
-    fontSize: 12,
-    color: Colors.text.secondary,
+    fontSize: 11,
+    color: '#666',
     textAlign: 'center',
   },
   // Performance Indicators
   indicatorsCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
@@ -2217,42 +2337,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   indicatorValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginVertical: 8,
+    color: '#1A1A1A',
+    marginVertical: 6,
   },
   indicatorLabel: {
-    fontSize: 11,
-    color: Colors.text.secondary,
+    fontSize: 10,
+    color: '#666',
     textAlign: 'center',
   },
   // Curve Styles
   curveCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   curveTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: Colors.text.primary,
-    marginBottom: 20,
+    color: '#1A1A1A',
+    marginBottom: 16,
   },
   curveContainer: {
-    height: 200,
+    height: 180,
     marginBottom: 16,
     position: 'relative',
   },
@@ -2268,7 +2388,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#F0F0F0',
   },
   curvePath: {
     position: 'absolute',
@@ -2284,7 +2404,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: Colors.primary,
+    backgroundColor: '#FFA500',
   },
   dayLabels: {
     position: 'absolute',
@@ -2295,51 +2415,51 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   dayLabel: {
-    fontSize: 11,
-    color: Colors.text.secondary,
+    fontSize: 10,
+    color: '#666',
     fontWeight: '500',
   },
   curveInsight: {
-    fontSize: 14,
-    color: Colors.text.secondary,
+    fontSize: 13,
+    color: '#666',
     textAlign: 'center',
     fontStyle: 'italic',
   },
   // Weekly Grid Styles
   weeklyGridCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   weeklyStatsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   weeklyStatBox: {
     alignItems: 'center',
     flex: 1,
   },
   weeklyStatNumber: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginVertical: 8,
+    color: '#1A1A1A',
+    marginVertical: 6,
   },
   weeklyStatText: {
-    fontSize: 12,
-    color: Colors.text.secondary,
+    fontSize: 11,
+    color: '#666',
     textAlign: 'center',
   },
   weeklyEarningsBar: {
@@ -2348,28 +2468,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: '#F0F0F0',
   },
   weeklyEarningsBigText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: Colors.text.primary,
-    marginHorizontal: 12,
+    color: '#1A1A1A',
+    marginHorizontal: 8,
   },
   weeklyEarningsLabel: {
-    fontSize: 14,
-    color: Colors.text.secondary,
+    fontSize: 12,
+    color: '#666',
   },
   weeklyGridTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    color: Colors.text.primary,
-    marginBottom: 16,
+    color: '#1A1A1A',
+    marginBottom: 12,
   },
   weeklyDetailsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 16,
     paddingHorizontal: 10,
   },
   weeklyDetailItem: {
@@ -2377,14 +2497,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   weeklyDetailLabel: {
-    fontSize: 11,
-    color: Colors.text.secondary,
-    marginBottom: 4,
+    fontSize: 10,
+    color: '#666',
+    marginBottom: 2,
   },
   weeklyDetailValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: Colors.text.primary,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
   },
 });
 

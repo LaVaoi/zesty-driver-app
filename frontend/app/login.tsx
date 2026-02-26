@@ -24,7 +24,6 @@ import {
   TouchableOpacity,
   View,
   Dimensions,
-  Pressable,
   Image,
 } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -33,23 +32,87 @@ import { registerForPushNotificationsAsync } from "@/utils/notifications";
 const { width } = Dimensions.get('window');
 
 const COLORS = {
+  // Zesty Green (Primary)
   primary: '#b4f349',
   primaryDark: '#8bc934',
-  secondary: '#FF2A00',
-  dark: '#1A1D21',
-  darkLight: '#2A2D32',
+  primaryLight: '#c6f66b',
+
+  // Zesty Orange (Secondary Accent)
+  secondary: '#FF6B2A',
+  secondaryLight: '#ff8f5c',
+
+  // Neutrals
+  dark: '#0F1215',
+  darkLight: '#1E2227',
   white: '#FFFFFF',
-  darkText: '#1F2937',
-  mediumText: '#6B7280',
-  lightText: '#9CA3AF',
-  inputBorder: '#E5E7EB',
+  darkText: '#1A1E23',
+  mediumText: '#6F767D',
+  lightText: '#9AA3AB',
+  inputBorder: '#E9ECEF',
   inputFocus: '#b4f349',
-  error: '#FF2A00',
-  gradientStart: '#1A1D21',
-  gradientEnd: '#111315',
-  gradientLightStart: '#F8F9FA',
-  gradientLightEnd: '#F0F2F5',
+  error: '#FF3B30',
+  success: '#34C759',
+
+  // Background
+  background: '#FFFFFF',
+  cardBackground: '#FFFFFF',
 };
+
+// Subcomponents for better organization
+const InputField = ({
+  label,
+  icon,
+  value,
+  onChangeText,
+  placeholder,
+  secureTextEntry,
+  onTogglePassword,
+  showPassword,
+  focused,
+  onFocus,
+  onBlur,
+  editable,
+  keyboardType,
+  isPassword = false
+}: any) => (
+  <View style={styles.inputWrapper}>
+    <Text style={styles.label}>
+      <MaterialIcons name={icon} size={18} color={COLORS.mediumText} /> {label}
+    </Text>
+    <View style={[
+      styles.inputContainer,
+      focused && styles.inputContainerFocused
+    ]}>
+      <TextInput
+        style={styles.input}
+        placeholder={placeholder}
+        placeholderTextColor={COLORS.lightText}
+        secureTextEntry={isPassword && !showPassword}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        editable={editable}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      {isPassword && (
+        <TouchableOpacity
+          onPress={onTogglePassword}
+          style={styles.eyeIcon}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={showPassword ? "eye-off" : "eye"}
+            size={22}
+            color={COLORS.mediumText}
+          />
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+);
 
 const DeliveryManLogin: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -129,150 +192,162 @@ const DeliveryManLogin: React.FC = () => {
 
   return (
     <SafeAreaView style={[styles.safeArea, { paddingTop: Platform.OS === 'ios' ? insets.top : 0 }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-      <LinearGradient
-        colors={[COLORS.gradientLightStart, COLORS.gradientLightEnd]}
-        style={styles.gradientBackground}
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 20}
       >
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 20}
-        >
-          <ScrollView
-            contentContainerStyle={[styles.container, { 
+        <ScrollView
+          contentContainerStyle={[
+            styles.container,
+            {
               paddingTop: Platform.OS === 'ios' ? insets.top + 20 : 40,
-              paddingBottom: Platform.OS === 'ios' ? insets.bottom + 20 : 32 
-            }]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+              paddingBottom: Platform.OS === 'ios' ? insets.bottom + 30 : 32
+            }
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Premium Header Section */}
+          <Animated.View
+            entering={FadeInUp.delay(100).springify()}
+            style={styles.header}
           >
-            {/* Header Section */}
-            <Animated.View
-              entering={FadeInUp.delay(100).springify()}
-              style={styles.header}
-            >
-              <Animated.View
-                entering={FadeInUp.delay(200).springify()}
-                style={styles.logoContainer}
+            <View style={styles.logoOuterContainer}>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.primaryDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.logoGradient}
               >
-                <View style={styles.logoGradient}>
-                  <Image
-                    source={require('@/assets/images/zesty-driver-icon.png')}
-                    style={styles.logoImage}
-                    resizeMode="contain"
-                  />
-                </View>
-              </Animated.View>
+                <Image
+                  source={require('@/assets/images/zesty-driver-icon.png')}
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
+              </LinearGradient>
+            </View>
 
-                <Text style={styles.title}>
-                  Zesty Driver
-                </Text>
+            <Text style={styles.title}>
+              Zesty Driver
+            </Text>
 
-              <Text style={styles.subtitle}>
-                Sign in to start delivering
-              </Text>
-            </Animated.View>
+            <Text style={styles.subtitle}>
+              Sign in to start delivering
+            </Text>
+          </Animated.View>
 
-            {/* Form Section */}
-            <Animated.View
-              entering={FadeInUp.delay(300).springify()}
-              style={styles.formContainer}
+          {/* Form Card */}
+          <Animated.View
+            entering={FadeInUp.delay(200).springify()}
+            style={styles.formCard}
+          >
+            <InputField
+              label="Email Address"
+              icon="email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="driver@example.com"
+              keyboardType="email-address"
+              focused={emailFocused}
+              onFocus={() => {
+                setEmailFocused(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              onBlur={() => setEmailFocused(false)}
+              editable={!loading}
+            />
+
+            <InputField
+              label="Password"
+              icon="lock"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Enter your password"
+              isPassword
+              secureTextEntry
+              showPassword={showPassword}
+              onTogglePassword={() => {
+                setShowPassword(!showPassword);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              focused={passwordFocused}
+              onFocus={() => {
+                setPasswordFocused(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              onBlur={() => setPasswordFocused(false)}
+              editable={!loading}
+            />
+
+            {/* Forgot Password Link (preserved for future logic) */}
+            <TouchableOpacity
+              style={styles.forgotPassword}
+              onPress={() => {
+                // Placeholder for future forgot password logic
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              activeOpacity={0.7}
             >
-              <Animated.View entering={FadeInDown.delay(400).springify()}>
-                <Text style={styles.label}>
-                  <MaterialIcons name="email" size={16} color={COLORS.mediumText} /> Email Address
-                </Text>
-                <View style={[
-                  styles.inputContainer,
-                  emailFocused && styles.inputContainerFocused
-                ]}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your email"
-                    placeholderTextColor={COLORS.lightText}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    value={email}
-                    onChangeText={setEmail}
-                    onFocus={() => {
-                      setEmailFocused(true);
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }}
-                    onBlur={() => setEmailFocused(false)}
-                    editable={!loading}
-                  />
-                </View>
-              </Animated.View>
+              <Text style={styles.forgotPasswordText}>
+                Forgot password?
+              </Text>
+            </TouchableOpacity>
 
-              <Animated.View entering={FadeInDown.delay(500).springify()}>
-                <Text style={styles.label}>
-                  <MaterialIcons name="lock" size={16} color={COLORS.mediumText} /> Password
-                </Text>
-                <View style={[
-                  styles.inputContainer,
-                  passwordFocused && styles.inputContainerFocused
-                ]}>
-                  <TextInput
-                    style={[styles.input, { flex: 1 }]}
-                    placeholder="Enter your password"
-                    placeholderTextColor={COLORS.lightText}
-                    secureTextEntry={!showPassword}
-                    value={password}
-                    onChangeText={setPassword}
-                    onFocus={() => {
-                      setPasswordFocused(true);
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }}
-                    onBlur={() => setPasswordFocused(false)}
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => {
-                      setShowPassword(!showPassword);
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }}
-                    style={styles.eyeIcon}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name={showPassword ? "eye-off" : "eye"}
-                      size={20}
-                      color={COLORS.mediumText}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </Animated.View>
+            {/* Sign In Button */}
+            <TouchableOpacity
+              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+              activeOpacity={0.9}
+            >
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.primaryDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.gradientButton}
+              >
+                {loading ? (
+                  <ActivityIndicator color={COLORS.dark} />
+                ) : (
+                  <>
+                    <Text style={styles.loginButtonText}>Sign In</Text>
+                    <View style={styles.buttonAccent}>
+                      <MaterialIcons
+                        name="arrow-forward"
+                        size={20}
+                        color={COLORS.dark}
+                      />
+                    </View>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
 
-              <Animated.View entering={FadeInDown.delay(600).springify()}>
-                <TouchableOpacity
-                  style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-                  onPress={handleLogin}
-                  disabled={loading}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient
-                    colors={[COLORS.primary, COLORS.primaryDark]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.gradientButton}
-                  >
-                    {loading ? (
-                      <ActivityIndicator color={COLORS.white} />
-                    ) : (
-                      <>
-                        <Text style={styles.loginButtonText}>Sign In</Text>
-                        <MaterialIcons name="arrow-forward" size={20} color={COLORS.dark} style={{ marginLeft: 8 }} />
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </Animated.View>
-            </Animated.View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </LinearGradient>
+            {/* Help/Support Link */}
+            <TouchableOpacity
+              style={styles.supportLink}
+              onPress={() => {
+                // Placeholder for future support logic
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="help-circle-outline" size={18} color={COLORS.mediumText} />
+              <Text style={styles.supportText}>
+                Need help? Contact support
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* Version Info (optional) */}
+          <Text style={styles.versionText}>
+            v1.0.0 • Delivery Partner App
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -280,111 +355,95 @@ const DeliveryManLogin: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.white,
-  },
-  gradientBackground: {
-    flex: 1,
+    backgroundColor: COLORS.background,
   },
   container: {
     flexGrow: 1,
     paddingHorizontal: Platform.OS === 'ios' ? 24 : 20,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   header: {
-    alignItems: "center",
-    marginBottom: Platform.OS === 'ios' ? 40 : 32,
-    width: '100%',
-    marginTop: Platform.OS === 'ios' ? 20 : 0,
+    alignItems: 'center',
+    marginBottom: Platform.OS === 'ios' ? 32 : 28,
   },
-  logoContainer: {
-    marginBottom: Platform.OS === 'ios' ? 24 : 20,
-  },
-  logoGradient: {
-    width: Platform.OS === 'ios' ? 110 : 100,
-    height: Platform.OS === 'ios' ? 110 : 100,
-    borderRadius: Platform.OS === 'ios' ? 28 : 24,
-    justifyContent: "center",
-    alignItems: "center",
-    overflow: 'hidden',
+  logoOuterContainer: {
+    marginBottom: Platform.OS === 'ios' ? 20 : 16,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.15,
-        shadowRadius: 16,
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
       },
       android: {
-        elevation: 8,
+        elevation: 10,
       },
     }),
   },
+  logoGradient: {
+    width: Platform.OS === 'ios' ? 100 : 90,
+    height: Platform.OS === 'ios' ? 100 : 90,
+    borderRadius: Platform.OS === 'ios' ? 25 : 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   logoImage: {
-    width: '100%',
-    height: '100%',
+    width: '70%',
+    height: '70%',
+    tintColor: COLORS.dark,
   },
   title: {
-    fontSize: Platform.OS === 'ios' ? 34 : 32,
-    fontWeight: "bold",
-    marginBottom: Platform.OS === 'ios' ? 12 : 8,
+    fontSize: Platform.OS === 'ios' ? 36 : 34,
+    fontWeight: '800',
     color: COLORS.darkText,
     letterSpacing: -0.5,
+    marginBottom: Platform.OS === 'ios' ? 10 : 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: Platform.OS === 'ios' ? 17 : 16,
     color: COLORS.mediumText,
     textAlign: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 24 : 20,
     lineHeight: Platform.OS === 'ios' ? 24 : 22,
+    paddingHorizontal: 20,
   },
-  formContainer: {
-    width: '100%',
-    backgroundColor: COLORS.white,
-    borderRadius: Platform.OS === 'ios' ? 28 : 24,
+  formCard: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: Platform.OS === 'ios' ? 24 : 20,
     padding: Platform.OS === 'ios' ? 28 : 24,
+    width: '100%',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.15,
-        shadowRadius: 24,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
       },
       android: {
-        elevation: 8,
+        elevation: 5,
       },
     }),
   },
+  inputWrapper: {
+    marginBottom: Platform.OS === 'ios' ? 20 : 18,
+  },
   label: {
     fontSize: Platform.OS === 'ios' ? 15 : 14,
+    fontWeight: '600',
     color: COLORS.darkText,
     marginBottom: Platform.OS === 'ios' ? 10 : 8,
-    fontWeight: '600',
     flexDirection: 'row',
     alignItems: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
-    height: Platform.OS === 'ios' ? 58 : 56,
-    borderWidth: Platform.OS === 'ios' ? 1.5 : 1.5,
+    height: Platform.OS === 'ios' ? 56 : 54,
+    borderWidth: 1.5,
     borderColor: COLORS.inputBorder,
-    borderRadius: Platform.OS === 'ios' ? 14 : 12,
+    borderRadius: Platform.OS === 'ios' ? 16 : 14,
     paddingHorizontal: Platform.OS === 'ios' ? 18 : 16,
-    marginBottom: Platform.OS === 'ios' ? 24 : 20,
     backgroundColor: COLORS.white,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
   },
   inputContainerFocused: {
     borderColor: COLORS.primary,
@@ -393,7 +452,7 @@ const styles = StyleSheet.create({
       ios: {
         shadowColor: COLORS.primary,
         shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.2,
+        shadowOpacity: 0.15,
         shadowRadius: 8,
       },
     }),
@@ -405,23 +464,32 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   eyeIcon: {
-    padding: 4,
+    padding: 8,
     marginLeft: 8,
+  },
+  forgotPassword: {
+    alignSelf: 'flex-end',
+    marginBottom: Platform.OS === 'ios' ? 28 : 24,
+  },
+  forgotPasswordText: {
+    color: COLORS.primaryDark,
+    fontSize: Platform.OS === 'ios' ? 15 : 14,
+    fontWeight: '600',
   },
   loginButton: {
     width: '100%',
-    borderRadius: Platform.OS === 'ios' ? 14 : 12,
+    borderRadius: Platform.OS === 'ios' ? 18 : 16,
     overflow: 'hidden',
-    marginTop: Platform.OS === 'ios' ? 12 : 8,
+    marginBottom: Platform.OS === 'ios' ? 20 : 18,
     ...Platform.select({
       ios: {
         shadowColor: COLORS.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.4,
-        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
       },
       android: {
-        elevation: 4,
+        elevation: 6,
       },
     }),
   },
@@ -430,6 +498,7 @@ const styles = StyleSheet.create({
   },
   gradientButton: {
     paddingVertical: Platform.OS === 'ios' ? 18 : 16,
+    paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -437,10 +506,37 @@ const styles = StyleSheet.create({
   loginButtonText: {
     color: COLORS.dark,
     fontSize: Platform.OS === 'ios' ? 18 : 17,
-    fontWeight: 'bold',
+    fontWeight: '700',
     letterSpacing: 0.5,
+    marginRight: 8,
+  },
+  buttonAccent: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.9,
+  },
+  supportLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
+  },
+  supportText: {
+    color: COLORS.mediumText,
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
+    fontWeight: '500',
+  },
+  versionText: {
+    textAlign: 'center',
+    color: COLORS.lightText,
+    fontSize: 12,
+    marginTop: Platform.OS === 'ios' ? 24 : 20,
   },
 });
 
 export default DeliveryManLogin;
-

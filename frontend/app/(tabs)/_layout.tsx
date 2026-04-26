@@ -1,4 +1,4 @@
-// app/delivery/tabs/_layout.tsx
+// app/(tabs)/_layout.tsx
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { StyleSheet, View, Text, Platform } from "react-native";
@@ -9,98 +9,181 @@ import Animated, {
 } from "react-native-reanimated";
 import { useDeliveryManNotifications } from '@/hooks/useDeliveryManNotifications';
 import { BlurView } from 'expo-blur';
-import Colors from '@/constants/Colors';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLanguage } from "@/constants/contexts/LanguageContext";
+
+const COLORS = {
+  background: '#0A0C0E',
+  surface: '#1A1D21',
+  surfaceElevated: '#252A2F',
+  primary: '#84CC16',
+  primaryDark: '#65A30D',
+  text: '#FFFFFF',
+  textSecondary: '#9AA1A9',
+  textMuted: '#5F6B7A',
+  border: '#2F353B',
+  tabBarInactive: '#6B7280',
+};
+
+const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+};
+
+const RADIUS = {
+  md: 14,
+  lg: 18,
+  xl: 24,
+  xxl: 32,
+};
+
+const TYPOGRAPHY = {
+  label: {
+    fontSize: 11,
+    fontWeight: "600" as const,
+    letterSpacing: 0.3,
+    lineHeight: 14,
+  },
+  badge: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    letterSpacing: -0.3,
+    lineHeight: 12,
+  },
+};
+
+const SHADOWS = {
+  small: Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+    },
+    android: {
+      elevation: 4,
+    },
+  }),
+  medium: Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+    },
+    android: {
+      elevation: 8,
+    },
+  }),
+  large: Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.3,
+      shadowRadius: 16,
+    },
+    android: {
+      elevation: 16,
+    },
+  }),
+};
 
 export default function DeliveryTabsLayout() {
   const { unreadCount } = useDeliveryManNotifications();
+  const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: "#6B7280",
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.label,
-        tabBarBackground: Platform.OS === 'ios' ? () => (
-          <BlurView
-            intensity={100}
-            tint="light"
-            style={styles.blurBackground}
-          />
-        ) : () => (
-          <View style={styles.androidBackground} />
-        ),
-        tabBarItemStyle: styles.tabBarItem,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size, focused }) => (
-            <AnimatedIcon
-              name="home-outline"
-              focusedName="home"
-              size={size}
-              color={color}
-              focused={focused}
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.tabBarInactive,
+          tabBarStyle: styles.tabBar,
+          tabBarLabelStyle: styles.label,
+          tabBarBackground: () => (
+            <BlurView
+              intensity={100}
+              tint="dark"
+              style={styles.tabBarBackground}
             />
           ),
+          tabBarItemStyle: styles.tabBarItem,
         }}
-      />
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: t.tabs.home,
+            tabBarIcon: ({ color, size, focused }) => (
+              <AnimatedIcon
+                name="home-outline"
+                focusedName="home"
+                size={size}
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="orders"
-        options={{
-          title: "Orders",
-          tabBarIcon: ({ color, size, focused }) => (
-            <AnimatedIcon
-              name="cube-outline"
-              focusedName="cube"
-              size={size}
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+        <Tabs.Screen
+          name="orders"
+          options={{
+            title: t.tabs.orders,
+            tabBarIcon: ({ color, size, focused }) => (
+              <AnimatedIcon
+                name="cube-outline"
+                focusedName="cube"
+                size={size}
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="notifications"
-        options={{
-          title: "Alerts",
-          tabBarIcon: ({ color, size, focused }) => (
-            <NotificationIconWithBadge
-              color={color}
-              size={size}
-              focused={focused}
-              unreadCount={unreadCount}
-            />
-          ),
-        }}
-      />
+        <Tabs.Screen
+          name="notifications"
+          options={{
+            title: t.tabs.alerts,
+            tabBarIcon: ({ color, size, focused }) => (
+              <NotificationIconWithBadge
+                color={color}
+                size={size}
+                focused={focused}
+                unreadCount={unreadCount}
+              />
+            ),
+          }}
+        />
 
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ color, size, focused }) => (
-            <AnimatedIcon
-              name="person-outline"
-              focusedName="person"
-              size={size}
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
-    </Tabs>
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: t.tabs.profile,
+            tabBarIcon: ({ color, size, focused }) => (
+              <AnimatedIcon
+                name="person-outline"
+                focusedName="person"
+                size={size}
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
+      </Tabs>
+    </View>
   );
 }
 
-/** Animated Icon Component */
 function AnimatedIcon({
   name,
   focusedName,
@@ -141,7 +224,6 @@ function AnimatedIcon({
   );
 }
 
-/** Notification Icon with Badge Component */
 function NotificationIconWithBadge({ color, size, focused, unreadCount }: {
   color: string;
   size: number;
@@ -188,92 +270,69 @@ function NotificationIconWithBadge({ color, size, focused, unreadCount }: {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   tabBar: {
-    height: Platform.OS === 'ios' ? 88 : 68,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-    paddingTop: 10,
-    backgroundColor: Platform.OS === 'ios' ? 'transparent' : '#FFFFFF',
-    borderTopWidth: 0,
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     position: 'absolute',
+    bottom: SPACING.lg,
+    left: SPACING.lg,
+    right: SPACING.lg,
+    height: 68,
+    backgroundColor: 'transparent',
+    borderTopWidth: 0,
+    borderRadius: RADIUS.xxl,
+    ...SHADOWS.large,
     overflow: 'hidden',
   },
-
-  blurBackground: {
+  tabBarBackground: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderTopWidth: 0,
+    backgroundColor: 'rgba(26, 29, 33, 0.9)',
   },
-
-  androidBackground: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 0,
-  },
-
   label: {
-    fontSize: 11,
-    fontWeight: "600",
-    marginTop: 6,
-    letterSpacing: -0.3,
+    ...TYPOGRAPHY.label,
     fontFamily: Platform.OS === 'ios' ? 'SF Pro Text' : 'sans-serif-medium',
+    marginTop: SPACING.xs,
   },
-
   tabBarItem: {
-    paddingVertical: 4,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.xs,
   },
-
   iconWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: SPACING.xs,
   },
-
   iconContainer: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -8,
-    backgroundColor: Colors.secondary,
-    borderRadius: 12,
-    minWidth: 20,
-    height: 20,
+    top: -8,
+    right: -10,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.lg,
+    minWidth: 22,
+    height: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 5,
+    paddingHorizontal: SPACING.xs,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
-    shadowColor: Colors.secondary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
+    borderColor: COLORS.surfaceElevated,
+    ...SHADOWS.small,
   },
-
   badgeSmall: {
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: SPACING.xs,
+    borderRadius: RADIUS.md,
   },
-
   badgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '800',
+    ...TYPOGRAPHY.badge,
+    color: COLORS.background,
     textAlign: 'center',
-    lineHeight: 12,
-    letterSpacing: -0.3,
   },
 });

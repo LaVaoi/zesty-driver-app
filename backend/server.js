@@ -4,14 +4,16 @@ import cors from "cors";
 import db, { initDB } from "./config/db.js";
 import pool from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
+import dealRoutes from "./routes/dealRoutes.js";
 import deliveryManRoutes from "./routes/deliveryManRoutes.js";
+import searchRoutes from "./routes/searchRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import notificationRoutes from './routes/notificationRoutes.js';
 import restaurantRoutes from "./routes/restaurantRoutes.js";
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import adminNotificationRoutes from './routes/adminNotificationRoutes.js';
-import { checkAndUpdateIsOpen, initOperatingHoursTable } from './controllers/adminController.js';
+import { checkAndUpdateIsOpen } from './controllers/adminController.js';
 dotenv.config();
 
 const app = express();
@@ -30,6 +32,8 @@ app.use("/api/restaurants", restaurantRoutes); // Add this line
 app.use("/api/delivery", deliveryManRoutes);
 app.use("/api/admin", adminRoutes);
 app.use('/uploads', express.static('uploads'));
+app.use("/api/deals", dealRoutes);
+app.use("/search", searchRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/notifications', adminNotificationRoutes); // Add this line
 const PORT = process.env.PORT || 8000;
@@ -402,24 +406,123 @@ const statusLogInterval = setInterval(logNotificationStatus, 30000); // Every 30
 // Scheduler for automatic is_open updates (runs every minute)
 let isOpenSchedulerInterval = null;
 
-const startIsOpenScheduler = () => {
-  // Run immediately on startup
-  checkAndUpdateIsOpen().then(isOpen => {
-    console.log(`🕐 Initial restaurant status: ${isOpen ? 'OPEN' : 'CLOSED'}`);
-  }).catch(err => {
-    console.error('Error on initial is_open check:', err);
-  });
-
-  // Then run every minute
-  isOpenSchedulerInterval = setInterval(async () => {
+const startIsOpenScheduler = async () => {
+  const runBatchUpdate = async () => {
+    let connection;
     try {
-      await checkAndUpdateIsOpen();
-    } catch (error) {
-      console.error('Error in is_open scheduler:', error);
-    }
-  }, 60000); // Every 60 seconds
+      connection = await pool.getConnection();
+      
+      // Include both manual_override and its expiration
+      const [restaurants] = await connection.execute(
+        'SELECT id, name, manual_override, manual_override_expires_at FROM restaurants'
+      );
+      
+      for (const restaurant of restaurants) {
+        // ---- Handle manual override with expiration ----
+        if (restaurant.manual_override) {
+          const now = new Date();
+          const expiresAt = restaurant.manual_override_expires_at ? new Date(restaurant.manual_override_expires_at) : null;
 
-  console.log('⏰ Restaurant open/close scheduler started (checks every minute)');
+          // If expired, clear override and fall through to schedule update
+          if (expiresAt && now > expiresAt) {
+            console.log(`[Scheduler] ${restaurant.name}: manual override EXPIRED, reverting to schedule`);
+            await connection.execute(
+              'UPDATE restaurants SET manual_override = false, manual_override_expires_at = NULL WHERE id = ?',
+              [restaurant.id]
+            );
+            // Do NOT skip – continue to calculate and apply schedule
+          } else {
+            // Still valid manual override – skip this restaurant
+            console.log(`[Scheduler] ${restaurant.name}: SKIPPED (manual override active until ${expiresAt?.toLocaleString()})`);
+            continue;
+          }
+        }
+
+        // ---- Calculate schedule-based status ----
+        const shouldBeOpen = await calculateIsOpenFromSchedule(connection, restaurant.id);
+        
+        // Get current value
+        const [[current]] = await connection.execute(
+          'SELECT is_open FROM restaurants WHERE id = ?',
+          [restaurant.id]
+        );
+        
+        // Update only if changed
+        if (current && current.is_open !== (shouldBeOpen ? 1 : 0)) {
+          await connection.execute(
+            'UPDATE restaurants SET is_open = ? WHERE id = ?',
+            [shouldBeOpen ? 1 : 0, restaurant.id]
+          );
+          console.log(`[Scheduler] ${restaurant.name}: ${shouldBeOpen ? 'OPEN' : 'CLOSED'} (updated)`);
+        } else {
+          console.log(`[Scheduler] ${restaurant.name}: ${shouldBeOpen ? 'OPEN' : 'CLOSED'} (unchanged)`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in is_open scheduler batch:', error);
+    } finally {
+      if (connection) connection.release();
+    }
+  };
+
+  // Helper function to calculate open status from schedule (without updating)
+  const calculateIsOpenFromSchedule = async (connection, restaurant_id) => {
+    try {
+      const serverTime = new Date();
+      const moroccoTimeStr = serverTime.toLocaleString("en-US", {timeZone: "Africa/Casablanca"});
+      const moroccoTime = new Date(moroccoTimeStr);
+      
+      const currentDay = moroccoTime.getDay();
+      const yesterday = (currentDay + 6) % 7;
+
+      const [rows] = await connection.execute(`
+        SELECT day_of_week, is_closed, open_time, close_time
+        FROM restaurant_operating_hours
+        WHERE restaurant_id = ? AND day_of_week IN (?, ?)
+      `, [restaurant_id, currentDay, yesterday]);
+
+      const todayHours = rows.find(r => r.day_of_week === currentDay);
+      const yesterdayHours = rows.find(r => r.day_of_week === yesterday);
+
+      const getShiftDate = (refDate, timeStr, dayOffset = 0) => {
+        const d = new Date(refDate);
+        d.setDate(d.getDate() + dayOffset);
+        const [h, m] = timeStr.split(':');
+        d.setHours(parseInt(h), parseInt(m), 0, 0);
+        return d;
+      };
+
+      // Check today's hours
+      if (todayHours && !todayHours.is_closed) {
+        const openToday = getShiftDate(moroccoTime, todayHours.open_time);
+        let closeToday = getShiftDate(moroccoTime, todayHours.close_time);
+        if (closeToday <= openToday) closeToday.setDate(closeToday.getDate() + 1);
+        if (moroccoTime >= openToday && moroccoTime < closeToday) return true;
+      }
+
+      // Check yesterday's overnight hours
+      if (yesterdayHours && !yesterdayHours.is_closed) {
+        const openYesterday = getShiftDate(moroccoTime, yesterdayHours.open_time, -1);
+        let closeYesterday = getShiftDate(moroccoTime, yesterdayHours.close_time, -1);
+        if (closeYesterday <= openYesterday) {
+          closeYesterday.setDate(closeYesterday.getDate() + 1);
+          if (moroccoTime >= openYesterday && moroccoTime < closeYesterday) return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Error calculating schedule status:', error);
+      return false;
+    }
+  };
+
+  // Run initial update
+  await runBatchUpdate();
+  
+  // Schedule every minute
+  setInterval(runBatchUpdate, 60000);
+  console.log('⏰ Multi-restaurant scheduler active - respects manual overrides');
 };
 
 // Cleanup on server shutdown
@@ -439,8 +542,6 @@ server.on('close', () => {
   try {
     await initDB(); // ✅ create table if it doesn't exist
 
-    // Initialize operating hours table
-    await initOperatingHoursTable();
 
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT} (HTTP & WebSocket)`);

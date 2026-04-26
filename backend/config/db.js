@@ -30,7 +30,7 @@ const pool = mysql.createPool({
   idleTimeout: 60000, // 60 seconds - keep connections alive
   // Reconnect settings
   acquireTimeout: 30000,
-  timezone: '+01:00'  // Morocco timezone
+  timezone: 'Z'  // Morocco timezone
 });
 
 // Test connection on startup
@@ -72,18 +72,36 @@ export const initDB = async () => {
         email VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         phone VARCHAR(20) NOT NULL,
-        birthDate DATE,
         gender ENUM('Male','Female','Other'),
         bio VARCHAR(500),
         verification_code VARCHAR(10),
         is_verified TINYINT DEFAULT 0,
         resetPasswordCode VARCHAR(10),
         resetPasswordExpire DATETIME,
-        adresses TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
+     // Fix phone column to allow Google login (no phone required)
+    try {
+      await connection.query(`
+        ALTER TABLE clients
+        MODIFY phone VARCHAR(20) NULL;
+      `);
+      console.log('✅ phone column updated to NULL');
+    } catch (error) {
+      console.log('Note: phone column may already allow NULL');
+    }
+     // Fix email column to allow Google login (no phone required)
+    try {
+      await connection.query(`
+        ALTER TABLE clients
+        MODIFY email VARCHAR(100) UNIQUE NULL;
+      `);
+      console.log('✅ phone column updated to NULL');
+    } catch (error) {
+      console.log('Note: phone column may already allow NULL');
+    }
 
     try {
       // Separate statements
@@ -122,8 +140,6 @@ export const initDB = async () => {
       { name: 'phoneVerificationCodeExpire', type: 'DATETIME' },
       { name: 'is_active', type: 'TINYINT DEFAULT 1' },
       { name: 'image', type: 'VARCHAR(255)' },
-      { name: 'lat', type: 'DECIMAL(10, 8)' },
-      { name: 'lon', type: 'DECIMAL(11, 8)' }
     ];
 
     for (const col of clientColumns) {
@@ -148,6 +164,18 @@ export const initDB = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       );
     `);
+
+    try {
+      await connection.query(`
+        ALTER TABLE categories
+        ADD COLUMN restaurant_id INT,
+        ADD CONSTRAINT fk_restaurant
+        FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE;
+      `);
+      console.log("restaurant_id column added successfully.");
+    } catch (error) {
+      console.error("Error adding restaurant_id column:", error);
+    }
 
     // 🧆 Products table
     await connection.query(`
@@ -195,36 +223,241 @@ export const initDB = async () => {
     }
 
   // 🍽️ Restaurants table
+  try {
+    console.log("🔥 Creating restaurants table...");
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS restaurants (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        specialities TEXT,
+        logo VARCHAR(255),
+        image VARCHAR(255),
+        address VARCHAR(255),
+        lat DECIMAL(10,7),
+        lon DECIMAL(10,7),
+        phone VARCHAR(30),
+        email VARCHAR(255),
+        rating DECIMAL(2,1) DEFAULT 0,
+        estimated_time VARCHAR(50) DEFAULT NULL,
+        delivery_fees DECIMAL(10,2) DEFAULT 0,
+        min_order DECIMAL(10,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    console.log("✅ Restaurants table created or already exists");
+
+  } catch (error) {
+    console.error("❌ Error creating restaurants table:", error.message);
+  }
+
+
+  ///
+
+  try {
+  await connection.query(`
+    ALTER TABLE restaurants 
+    ADD COLUMN manual_override_expires_at DATETIME NULL;
+  `);
+  console.log("✅ Column 'manual_override_expires_at' added successfully.");
+} catch (error) {
+  if (error.message.includes('Duplicate column name')) {
+    console.log("ℹ️ Column 'manual_override_expires_at' already exists.");
+  } else {
+    console.error("❌ Error adding column:", error.message);
+  }
+}
+  ///
+
+  // add column is_open to table restaurants
+    try {
+    await connection.query(`
+      ALTER TABLE restaurants
+      ADD COLUMN is_open TINYINT(1) DEFAULT 1
+    `);
+
+    console.log("✅ is_open column added to restaurants table");
+  } catch (error) {
+    console.error("❌ Error adding is_open column to restaurants:", error);
+  }
+
+  // add column is_popular to table restaurants
+    try {
+    await connection.query(`
+      ALTER TABLE restaurants
+      ADD COLUMN is_popular BOOLEAN DEFAULT FALSE
+    `);
+
+    console.log("✅ is_popular column added to restaurants table");
+  } catch (error) {
+    console.error("❌ Error adding is_popular column to restaurants:", error);
+  }
+
+
+  try {
+  console.log("🛠️  Updating restaurants table with delivery settings...");
+
+  // Define the columns we want to add
+  const columnsToAdd = [
+    "ADD COLUMN base_delivery_fee DECIMAL(10,2) DEFAULT 0.00",
+    "ADD COLUMN per_km_fee DECIMAL(10,2) DEFAULT 1.50",
+    "ADD COLUMN max_delivery_distance_km DECIMAL(10,2) DEFAULT 20.00",
+    "ADD COLUMN min_delivery_fee DECIMAL(10,2) DEFAULT 5.00",
+    "ADD COLUMN max_delivery_fee DECIMAL(10,2) DEFAULT 50.00"
+  ];
+
+  for (const columnSql of columnsToAdd) {
+    try {
+      // We run each column individually so if one exists, the loop continues
+      await connection.query(`ALTER TABLE restaurants ${columnSql}`);
+      console.log(`✅ Column added/verified: ${columnSql.split(' ')[2]}`);
+    } catch (err) {
+      // Error code 1060 = "Duplicate column name", which is fine!
+      if (err.errno === 1060) {
+        // Just skip if it already exists
+      } else {
+        console.error(`❌ Error adding column:`, err.message);
+      }
+    }
+  }
+
+  console.log("✅ Restaurant delivery settings columns ready");
+} catch (error) {
+  console.error("❌ Error in restaurant table migration:", error);
+}
+
+
 try {
-  console.log("🔥 Creating restaurants table...");
+  await connection.query(`
+    ALTER TABLE restaurants 
+    ADD COLUMN manual_override BOOLEAN DEFAULT FALSE;
+  `);
+
+  console.log("Column 'manual_override' added successfully.");
+} catch (error) {
+  console.error("Error adding 'manual_override' column:", error.message);
+}
+
+
+// 📊 Search history table for tracking user searches
+try {
+  console.log("🔍 Creating search_history table...");
 
   await connection.query(`
-    CREATE TABLE IF NOT EXISTS restaurants (
+    CREATE TABLE IF NOT EXISTS search_history (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      description TEXT,
-      specialities TEXT,
-      logo VARCHAR(255),
-      image VARCHAR(255),
-      address VARCHAR(255),
-      lat DECIMAL(10,7),
-      lon DECIMAL(10,7),
-      phone VARCHAR(30),
-      email VARCHAR(255),
-      rating DECIMAL(2,1) DEFAULT 0,
-      estimated_time VARCHAR(50) DEFAULT NULL,
-      delivery_fees DECIMAL(10,2) DEFAULT 0,
-      min_order DECIMAL(10,2) DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      user_id INT NOT NULL,
+      query VARCHAR(255) NOT NULL,
+      results_count INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES clients(id) ON DELETE CASCADE,
+      INDEX idx_user_searches (user_id, created_at),
+      INDEX idx_popular_searches (query, created_at)
     );
   `);
 
-  console.log("✅ Restaurants table created or already exists");
+  console.log("✅ search_history table created or already exists");
 
 } catch (error) {
-  console.error("❌ Error creating restaurants table:", error.message);
+  console.error("❌ Error creating search_history table:", error.message);
 }
 
+// Optional: Add cleanup for old searches (keep last 30 days)
+try {
+  console.log("🧹 Setting up search_history cleanup event...");
+  
+  // Create an event to automatically delete searches older than 30 days
+  await connection.query(`
+    CREATE EVENT IF NOT EXISTS cleanup_old_searches
+    ON SCHEDULE EVERY 1 DAY
+    DO
+      DELETE FROM search_history 
+      WHERE created_at < NOW() - INTERVAL 30 DAY;
+  `);
+  
+  console.log("✅ Search history cleanup event created");
+} catch (error) {
+  // Events might not be enabled in MySQL, so just log and continue
+  if (!error.message.includes('Event scheduler is disabled')) {
+    console.error("❌ Error creating cleanup event:", error.message);
+  } else {
+    console.log("ℹ️ Event scheduler disabled - skipping automatic cleanup");
+  }
+}
+
+// Optional: Add a stored procedure for getting popular searches
+try {
+  console.log("📊 Creating popular searches procedure...");
+  
+  await connection.query(`
+    CREATE PROCEDURE IF NOT EXISTS GetPopularSearches(IN limit_count INT)
+    BEGIN
+      SELECT 
+        query,
+        COUNT(*) as search_count,
+        MAX(created_at) as last_searched
+      FROM search_history
+      WHERE created_at >= NOW() - INTERVAL 7 DAY
+      GROUP BY query
+      ORDER BY search_count DESC, last_searched DESC
+      LIMIT limit_count;
+    END;
+  `);
+  
+  console.log("✅ Popular searches procedure created");
+} catch (error) {
+  console.error("❌ Error creating procedure:", error.message);
+}
+
+
+  try {
+  console.log("🔥 Creating restaurant_operating_hours table...");
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS restaurant_operating_hours (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      restaurant_id INT NOT NULL,
+      day_of_week TINYINT NOT NULL COMMENT '0=Sunday, 1=Monday, ..., 6=Saturday',
+      is_closed TINYINT(1) DEFAULT 0,
+      open_time TIME DEFAULT '09:00:00',
+      close_time TIME DEFAULT '22:00:00',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+
+      UNIQUE KEY unique_restaurant_day (restaurant_id, day_of_week),
+      INDEX idx_restaurant (restaurant_id),
+      INDEX idx_day_of_week (day_of_week),
+      INDEX idx_is_closed (is_closed)
+    );
+  `);
+
+  console.log("✅ restaurant_operating_hours table ready");
+} catch (error) {
+  console.error("❌ Error creating restaurant_operating_hours table:", error);
+}
+
+try {
+  // We use connection.query for structural changes
+  await connection.query(`
+    ALTER TABLE restaurant_operating_hours 
+    ADD UNIQUE KEY unique_rest_day (restaurant_id, day_of_week);
+  `);
+  console.log('Unique constraint added successfully.');
+} catch (error) {
+  // MySQL error code for 'Duplicate key name' is 'ER_DUP_KEYNAME'
+  // Or check the message for 'Duplicate key name'
+  if (error.code === 'ER_DUP_KEYNAME' || error.message.includes('Duplicate key name')) {
+    console.log('Note: unique_rest_day constraint already exists. Skipping.');
+  } else {
+    // If it's a different error (like a missing column), we want to know!
+    console.error('Failed to update table structure:', error.message);
+    throw error; 
+  }
+}
 
   // Just add restaurant_id column with foreign key constraint - simple try catch
   try {
@@ -270,7 +503,30 @@ try {
     }
   }
 
+  // 🏠 Addresses table
+try {
+  console.log("🔥 Creating addresses table...");
 
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS addresses (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      full_address TEXT NOT NULL,
+      is_default BOOLEAN DEFAULT FALSE,
+      lat DECIMAL(10,7),
+      lon DECIMAL(10,7),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES clients(id) ON DELETE CASCADE
+    );
+  `);
+
+  console.log("✅ Addresses table created or already exists");
+
+} catch (error) {
+  console.error("❌ Error creating addresses table:", error.message);
+}
 
 
     // 🧾 Orders table
@@ -292,6 +548,39 @@ try {
       );
     `);
 
+    // Add last_login column if it doesn't exist
+    try {
+      await connection.query(`ALTER TABLE orders modify COLUMN status ENUM('Pending','Accepted', 'Preparing', 'OutForDelivery', 'Delivered', 'Cancelled') DEFAULT 'Pending';`);
+    } catch (error) {
+      if (!error.message.includes('Duplicate column name')) {
+        console.log('Note: status column may already exist');
+      }
+    }
+
+   // Add zesty_discount column if it doesn't exist
+try {
+  await connection.query(`
+    ALTER TABLE orders 
+    ADD COLUMN zesty_discount DECIMAL(10,2) DEFAULT 0 AFTER discount;
+  `);
+} catch (error) {
+  if (!error.message.includes('Duplicate column name')) {
+    console.log('Note: zesty_discount column may already exist');
+  }
+}
+
+   // Add final_price_before_zesty column if it doesn't exist
+try {
+  await connection.query(`
+    ALTER TABLE orders 
+    ADD COLUMN final_price_before_zesty DECIMAL(10,2) DEFAULT 0 AFTER zesty_discount;
+  `);
+} catch (error) {
+  if (!error.message.includes('Duplicate column name')) {
+    console.log('Note: final_price_before_zesty column may already exist');
+  }
+}
+
 
     // Add last_login column if it doesn't exist
     try {
@@ -301,6 +590,40 @@ try {
         console.log('Note: set_prepared_at column may already exist');
       }
     }
+
+    // Add special_instructions column if it doesn't exist
+    try {
+      await connection.query(`ALTER TABLE orders ADD COLUMN special_instructions TEXT NULL;`);
+    } catch (error) {
+      if (!error.message.includes('Duplicate column name')) {
+        console.log('Note: special_instructions column may already exist');
+      }
+    }
+
+    // Add restaurant_id column if it doesn't exist
+try {
+  await connection.query(`ALTER TABLE orders ADD COLUMN restaurant_id INT NULL;`);
+} catch (error) {
+  if (!error.message.includes('Duplicate column name')) {
+    console.log('Note: restaurant_id column may already exist');
+  }
+}
+
+  // Add foreign key constraint if it doesn't exist
+  try {
+    await connection.query(`
+      ALTER TABLE orders 
+      ADD CONSTRAINT fk_orders_restaurant_id
+      FOREIGN KEY (restaurant_id) 
+      REFERENCES restaurants(id)
+      ON DELETE SET NULL
+      ON UPDATE CASCADE;
+    `);
+  } catch (error) {
+    if (!error.message.includes('Duplicate key') && !error.message.includes('already exists')) {
+      console.log('Note: Foreign key constraint may already exist');
+    }
+  }
 
 
     // 🍱 Order_Items table
@@ -327,6 +650,19 @@ try {
         FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
         UNIQUE KEY unique_favorite (client_id, product_id)
+      );
+    `);
+
+    // 💖 Restaurant Favorites table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS restaurant_favorites (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        restaurant_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_restaurant_favorite (client_id, restaurant_id)
       );
     `);
 
@@ -404,16 +740,28 @@ try {
     await connection.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        restaurant_id INT NOT NULL,
         name VARCHAR(100) NOT NULL,
         email VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        role ENUM('super_admin', 'admin', 'manager') DEFAULT 'admin',
         is_active TINYINT DEFAULT 1,
         last_login DATETIME,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
       );
     `);
+
+    // ➕ Add fcm_token column to admins table if not exists
+    try {
+      await connection.query(`
+        ALTER TABLE admins
+        ADD COLUMN fcm_token VARCHAR(255) NULL;
+      `);
+      console.log("fcm_token column added successfully");
+    } catch (error) {
+      console.log("Note: fcm_token column may already exist or alteration failed");
+    }
 
     // 🔔 Notifications table - NO foreign keys (polymorphic relationship)
     await connection.query(`
@@ -735,6 +1083,109 @@ await fixTablesIfNeeded();
       );
     `);
 
+    // Add restaurant_id column if it doesn't exist
+    try {
+      await connection.query(`ALTER TABLE promo_codes ADD COLUMN restaurant_id INT NULL;`);
+      console.log('✅ Added restaurant_id column to promo_codes table');
+    } catch (error) {
+      if (!error.message.includes('Duplicate column name')) {
+        console.log('Note: restaurant_id column may already exist in promo_codes table');
+      }
+    }
+
+    // Add foreign key constraint
+    try {
+      await connection.query(`
+        ALTER TABLE promo_codes 
+        ADD CONSTRAINT fk_promo_codes_restaurant 
+        FOREIGN KEY (restaurant_id) 
+        REFERENCES restaurants(id) 
+        ON DELETE CASCADE;
+      `);
+      console.log('✅ Added foreign key constraint to promo_codes table');
+    } catch (error) {
+      if (!error.message.includes('Duplicate foreign key')) {
+        console.log('Note: Foreign key constraint may already exist');
+      }
+    }
+
+
+    // ========= deals system start =========
+try {
+  console.log("🔥 Creating deals table...");
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS deals (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      restaurant_id INT NULL,
+      name VARCHAR(255) NOT NULL,
+      discount_type ENUM('percentage', 'fixed') NOT NULL,
+      discount DECIMAL(10,2) NOT NULL,
+      image VARCHAR(500),
+      description TEXT,
+      start_at TIMESTAMP NOT NULL,
+      end_at TIMESTAMP NOT NULL,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      INDEX idx_deals_restaurant (restaurant_id),
+      INDEX idx_deals_dates (start_at, end_at),
+      INDEX idx_deals_active (is_active),
+      INDEX idx_deals_discount_type (discount_type),
+
+      FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+    );
+  `);
+
+  console.log("✅ Deals table created successfully");
+} catch (error) {
+  console.error("❌ Error creating deals table:", error.message);
+}
+
+try {
+  console.log("🔥 Creating deals_products table...");
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS deals_products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      deal_id INT NOT NULL,
+      product_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+
+      UNIQUE KEY unique_deal_product (deal_id, product_id),
+      INDEX idx_deal_products (deal_id, product_id)
+    );
+  `);
+
+  console.log("✅ deals_products table created successfully");
+} catch (error) {
+  console.error("❌ Error creating deals_products table:", error.message);
+}
+
+
+
+try {
+  console.log("🔥 Adding times_used column to deals table...");
+
+  await connection.query(`
+    ALTER TABLE deals
+    ADD COLUMN times_used INT DEFAULT 0 AFTER discount;
+  `);
+
+  console.log("✅ times_used column added to deals table");
+} catch (error) {
+  console.error("❌ Error adding times_used column:", error.message);
+}
+
+// ========= deals system end =========
+
+
+
     // 📝 Order Promo Codes tracking table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS order_promo_codes (
@@ -864,6 +1315,8 @@ await fixTablesIfNeeded();
     if (connection) connection.release();
   }
 };
+
+
 
     // end the offers process
 // Enhanced executeQuery with better retry logic

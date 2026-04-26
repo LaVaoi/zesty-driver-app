@@ -1,7 +1,7 @@
 export default {
   // Brand core
-  primary: '#b4f349',        // Zesty Lime Green
-  primaryLight: '#d4fb9a',   // Light lime
+  primary: '#a9e866',        // Zesty Lime Green
+  primaryLight: '#FFF4F0',   // Light lime
   primaryDark: '#8bc934',    // Darker lime
   primaryMuted: '#b4f34920', // Transparent lime for backgrounds
 

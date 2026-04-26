@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LanguageProvider } from '@/constants/contexts/LanguageContext';
 
 function useProtectedRoute(isAuthenticated: boolean | null) {
   const segments = useSegments();
@@ -43,10 +44,12 @@ export default function DeliveryLayout() {
   useProtectedRoute(isAuthenticated);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="login" />
-      <Stack.Screen name="(tabs)" />
-    </Stack>
+    <LanguageProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="login" />
+        <Stack.Screen name="(tabs)" />
+      </Stack>
+    </LanguageProvider>
   );
 }
 

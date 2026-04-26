@@ -1,61 +1,72 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
-import db from "../config/db.js"; // adjust to your DB connection file
-import pool from "../config/db.js";
+import { default as db, default as pool } from "../config/db.js"; // adjust to your DB connection file
 import { sendVerificationSMS } from '../utils/smsService.js'; // Add .js extension
 
 export const register = async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
 
-    // Validate required fields
-    if (!name || !email || !password || !password.trim() || !phone) {
-      return res.status(400).json({ message: "All fields are required" });
+    // 🧩 1. Cleanup: Treat empty strings/whitespace as real NULL
+    const cleanEmail = (email && email.trim() !== "") ? email.trim() : null;
+
+    // 🧩 2. Validation
+    if (!name || !password || !password.trim() || !phone) {
+      return res.status(400).json({ message: "Name, password, and phone are required" });
     }
 
-
-    // Check if client already exists
-    const [existing] = await db.execute("SELECT * FROM clients WHERE email = ?", [email]);
-    if (existing.length > 0) {
-      return res.status(409).json({ message: "Email already registered" });
+    // 🧩 3. Check for existing account
+    if (cleanEmail) {
+      const [existingEmail] = await db.execute("SELECT * FROM clients WHERE email = ?", [cleanEmail]);
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ message: "Email already registered" });
+      }
     }
 
-    // Hash the password
+    const [existingPhone] = await db.execute("SELECT * FROM clients WHERE phone = ?", [phone]);
+    if (existingPhone.length > 0) {
+      return res.status(409).json({ message: "Phone number already registered" });
+    }
+
+    // 🧩 4. Hash password and Insert
     const hashedPassword = await bcrypt.hash(password.trim(), 10);
-
-    // Generate 6-digit random verification code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000);
-
-    // Insert new client into DB (email not verified yet)
-    await db.execute(
-      "INSERT INTO clients (name, email, password, phone, verification_code, is_verified) VALUES (?, ?, ?, ?, ?, ?)",
-      [name, email, hashedPassword, phone, verificationCode, 0]
+    
+    const [result] = await db.execute(
+      "INSERT INTO clients (name, email, password, phone, is_verified) VALUES (?, ?, ?, ?, ?)",
+      [name, cleanEmail, hashedPassword, phone, 1]
     );
 
-    // Send verification email
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER, // your Gmail
-        pass: process.env.EMAIL_PASS, // your app password
-      },
-    });
+    const newClientId = result.insertId;
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Verify Your Email",
-      text: `Welcome to our app! Your verification code is: ${verificationCode}`,
-    };
+    // 🧩 5. Auto-Login: Generate JWT (Matches your login logic)
+    const token = jwt.sign(
+      { id: newClientId, email: cleanEmail, name: name },
+      process.env.JWT_SECRET,
+      { expiresIn: "36500d" } // Permanent login
+    );
 
-    await transporter.sendMail(mailOptions);
-
+    // 🧩 6. Final Response (Matches login response structure)
     res.status(201).json({
-      message: "Client registered successfully. Verification code sent to your email.",
+      message: "Registration successful",
+      client: {
+        id: newClientId,
+        name: name,
+        email: cleanEmail,
+        phone: phone,
+        gender: null,
+        bio: null,
+        image: null,
+        isPhoneVerified: 0,
+        lat: null, 
+        lon: null,
+        full_address: null,
+      },
+      token,
     });
+
   } catch (error) {
-    console.error(error);
+    console.error("❌ Register error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -115,74 +126,53 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    // 🧩 2. Get a connection
     connection = await pool.getConnection();
 
-    // 🧩 3. FIRST: Check if it's an admin login from the admins table
+    // 🧩 2. Check if it's an admin login
     const [adminRows] = await connection.execute(
       "SELECT * FROM admins WHERE email = ? AND is_active = 1",
       [email]
     );
 
     if (adminRows.length > 0) {
-    const admin = adminRows[0];
-    
-    // Compare passwords (assuming passwords are hashed with bcrypt)
-    const isMatch = await bcrypt.compare(password, admin.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      const admin = adminRows[0];
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (!isMatch) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+
+      const token = jwt.sign(
+        { id: admin.id, email: admin.email, name: admin.name, role: admin.role || 'admin' },
+        process.env.JWT_SECRET,
+        { expiresIn: "36500d" }
+      );
+
+      const tokenExpiresAt = new Date();
+      tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 7);
+
+      await connection.execute(
+        `UPDATE admins SET last_login = NOW(), api_token = ?, token_expires_at = ? WHERE id = ?`,
+        [token, tokenExpiresAt, admin.id]
+      );
+
+      return res.status(200).json({
+        message: "Admin login successful",
+        admin: { email: admin.email, id: admin.id },
+        token,
+      });
     }
 
-    // Generate JWT token for admin
-    const token = jwt.sign(
-      {
-        id: admin.id,
-        email: admin.email,
-        name: admin.name,
-        role: admin.role || 'admin'
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    // ✅ CRITICAL: Update BOTH last_login AND api_token in the database
-    const tokenExpiresAt = new Date();
-    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 7); // Expires in 7 days
-
-    await connection.execute(
-      `UPDATE admins 
-      SET last_login = NOW(),
-          api_token = ?,
-          token_expires_at = ?
-      WHERE id = ?`,
-      [token, tokenExpiresAt, admin.id]
-    );
-
-    console.log('✅ Updated admin token in database:', {
-      adminId: admin.id,
-      email: admin.email,
-      tokenPreview: token.substring(0, 30) + '...',
-      expiresAt: tokenExpiresAt.toISOString()
-    });
-
-    return res.status(200).json({
-      message: "Admin login successful",
-      admin: {
-        email: admin.email,  // Only return email, nothing else
-        id: admin.id,
-      },
-      token,
-    });
-    }
-
-
-
-    // 🧩 2. Get a connection
-    connection = await pool.getConnection();
-
-    // 🧩 3. Check if client exists
+    // 🧩 3. Client Login: Query basic info JOINED with default address
     const [rows] = await connection.execute(
-      "SELECT * FROM clients WHERE email = ?",
+      `SELECT 
+        c.id, c.name, c.email, c.phone, c.password, 
+        c.gender, c.bio, c.image, c.isPhoneVerified,
+        a.lat as addr_lat, 
+        a.lon as addr_lon, 
+        a.full_address 
+       FROM clients c
+       LEFT JOIN addresses a ON c.id = a.user_id AND a.is_default = 1
+       WHERE c.email = ?`,
       [email]
     );
 
@@ -192,24 +182,20 @@ export const login = async (req, res) => {
 
     const client = rows[0];
 
-    // 🧩 5. Compare passwords securely
+    // 🧩 4. Compare passwords
     const isMatch = await bcrypt.compare(password, client.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // 🧩 6. Generate JWT token
+    // 🧩 5. Generate JWT
     const token = jwt.sign(
-      {
-        id: client.id,
-        email: client.email,
-        name: client.name,
-      },
+      { id: client.id, email: client.email, name: client.name },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" } // you can adjust expiration
+      { expiresIn: "36500d" }
     );
 
-    // 🧩 7. Send response
+    // 🧩 6. Final Response
     return res.status(200).json({
       message: "Login successful",
       client: {
@@ -217,17 +203,18 @@ export const login = async (req, res) => {
         name: client.name,
         email: client.email,
         phone: client.phone,
-        birthDate: client.birthDate,
         gender: client.gender,
         bio: client.bio,
-        adresses: client.adresses,
         image: client.image,
         isPhoneVerified: client.isPhoneVerified,
-        lat: client.lat,
-        lon: client.lon,
+        // Location data from the joined addresses table
+        lat: client.addr_lat || null, 
+        lon: client.addr_lon || null,
+        full_address: client.full_address || null,
       },
       token,
     });
+
   } catch (error) {
     console.error("❌ Login error:", error.message);
     return res.status(500).json({ message: "Server error during login" });
@@ -307,20 +294,37 @@ export const forgotPassword = async (req, res) => {
 };
 
 export const resetPassword = async (req, res) => {
+  let connection;
   try {
     const { email, code, password } = req.body;
     if (!email || !code || !password) {
       return res.status(400).json({ message: "Email, code, and new password are required." });
     }
-    
-    // Check if client exists
-    const [rows] = await pool.query("SELECT * FROM clients WHERE email = ?", [email]);
+
+    connection = await pool.getConnection();
+
+    // 🧩 1. Query: Get client basic info, reset fields, AND JOIN with default address
+    const [rows] = await connection.execute(
+      `SELECT 
+        c.id, c.name, c.email, c.phone, c.password, 
+        c.gender, c.bio, c.image, c.isPhoneVerified,
+        c.resetPasswordCode, c.resetPasswordExpire,
+        a.lat as addr_lat, 
+        a.lon as addr_lon, 
+        a.full_address 
+       FROM clients c
+       LEFT JOIN addresses a ON c.id = a.user_id AND a.is_default = 1
+       WHERE c.email = ?`,
+      [email]
+    );
+
     if (rows.length === 0) {
       return res.status(404).json({ message: "No user found with this email." });
     }
+
     const client = rows[0];
-    
-    // Check if code matches and not expired
+
+    // 🧩 2. Check if code matches and is not expired
     if (
       !client.resetPasswordCode ||
       client.resetPasswordCode !== code ||
@@ -330,49 +334,47 @@ export const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired reset code." });
     }
 
-
-    // Hash the new password
+    // 🧩 3. Hash the new password
     const hashedPassword = await bcrypt.hash(password.trim(), 10);
-    
-    // Update password and clear reset fields
-    await pool.query(
+
+    // 🧩 4. Update password and clear reset fields
+    await connection.execute(
       "UPDATE clients SET password = ?, resetPasswordCode = NULL, resetPasswordExpire = NULL WHERE id = ?",
       [hashedPassword, client.id]
     );
-    
-    // ✅ Generate JWT token (login automatically)
+
+    // 🧩 5. Generate JWT token
     const token = jwt.sign(
-      {
-        id: client.id,
-        email: client.email,
-        name: client.name,
-      },
+      { id: client.id, email: client.email, name: client.name },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "36500d" }
     );
-    
+
+    // 🧩 6. Final Response (Same structure as login)
     return res.status(200).json({
+      success: true,
       message: "Password has been reset successfully and you are logged in.",
       client: {
         id: client.id,
         name: client.name,
         email: client.email,
         phone: client.phone,
-        birthDate: client.birthDate,
         gender: client.gender,
         bio: client.bio,
-        adresses: client.adresses,
         image: client.image,
         isPhoneVerified: client.isPhoneVerified,
-        lat: client.lat,
-        lon: client.lon,
+        // Location data from addresses table
+        lat: client.addr_lat || null,
+        lon: client.addr_lon || null,
+        full_address: client.full_address || null,
       },
       token,
-      success: true,
     });
   } catch (error) {
-    console.error("Reset password error:", error);
+    console.error("❌ Reset password error:", error.message);
     return res.status(500).json({ message: "Server error." });
+  } finally {
+    if (connection) connection.release();
   }
 };
 
@@ -492,7 +494,7 @@ export const deliveryManLogin = async (req, res) => {
         name: deliveryMan.name,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" } // you can adjust expiration
+      { expiresIn: "36500d" } // you can adjust expiration
     );
     // 🧩 7. Send response
     return res.status(200).json({
@@ -523,38 +525,47 @@ export const loginWithPhone = async (req, res) => {
   let connection;
   try {
     const { phone, password } = req.body;
-    // 🧩 1. Validate input
     if (!phone || !password) {
       return res.status(400).json({ message: "Phone number and password are required" });
     }
-    // 🧩 2. Get a connection
+
     connection = await pool.getConnection();
-    // 🧩 3. Check if client exists
+
+    // 🧩 3. Query: Get client basic info and JOIN with default address
+    // Note: We explicitly alias a.lat and a.lon to ensure they come from 'addresses'
     const [rows] = await connection.execute(
-      "SELECT * FROM clients WHERE phone = ?",
+      `SELECT 
+        c.id, c.name, c.email, c.phone, c.password, 
+        c.gender, c.bio, c.image, c.isPhoneVerified,
+        a.lat as addr_lat, 
+        a.lon as addr_lon, 
+        a.full_address 
+       FROM clients c
+       LEFT JOIN addresses a ON c.id = a.user_id AND a.is_default = 1
+       WHERE c.phone = ?`,
       [phone]
     );
+
     if (rows.length === 0) {
       return res.status(404).json({ message: "No account found with this phone number" });
     }
+    
     const client = rows[0];
     
-    // 🧩 5. Compare passwords securely
+    // 🧩 5. Compare passwords
     const isMatch = await bcrypt.compare(password, client.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid phone number or password" });
     }
-    // 🧩 6. Generate JWT token
+
+    // 🧩 6. Generate JWT
     const token = jwt.sign(
-      {
-        id: client.id,
-        email: client.email,
-        name: client.name,
-      },
+      { id: client.id, email: client.email, name: client.name },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "36500d" }
     );
-    // 🧩 7. Send response
+
+    // 🧩 7. Final Response (Location data strictly from addresses table)
     return res.status(200).json({
       message: "Login successful",
       client: {
@@ -562,14 +573,14 @@ export const loginWithPhone = async (req, res) => {
         name: client.name,
         email: client.email,
         phone: client.phone,
-        birthDate: client.birthDate,
         gender: client.gender,
         bio: client.bio,
-        adresses: client.adresses,
         image: client.image,
         isPhoneVerified: client.isPhoneVerified,
-        lat: client.lat,
-        lon: client.lon,
+        // These fields now only populate if a default address exists in the 'addresses' table
+        lat: client.addr_lat || null, 
+        lon: client.addr_lon || null,
+        full_address: client.full_address || null,
       },
       token,
     });
@@ -1542,10 +1553,8 @@ export const loginWithGoogle = async (req, res) => {
         email: email,
         name: name || payload.name || email.split('@')[0],
         phone: null,
-        birthDate: null,
         gender: null,
         bio: null,
-        adresses: null,
         image: photo || payload.picture,
         isPhoneVerified: 0,
         is_verified: 1,
@@ -1589,7 +1598,7 @@ export const loginWithGoogle = async (req, res) => {
         name: clientData.name,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "36500d" }
     );
 
     // 🧩 8. Send response
@@ -1600,10 +1609,8 @@ export const loginWithGoogle = async (req, res) => {
         name: clientData.name,
         email: clientData.email,
         phone: clientData.phone,
-        birthDate: clientData.birthDate,
         gender: clientData.gender,
         bio: clientData.bio,
-        adresses: clientData.adresses,
         image: clientData.image,
         isPhoneVerified: clientData.isPhoneVerified,
       },
@@ -1832,82 +1839,41 @@ export const setClientLanguage = async (req, res) => {
 export const getInCartProducts = async (req, res) => {
   let connection;
   try {
-    const { userId } = req.query; // Get userId to check if offer is applied
+    const { restaurant_id } = req.query;
+    if (!restaurant_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'restaurant_id is required'
+      });
+    }
+
     connection = await pool.getConnection();
-    
-    // We fetch products and JOIN them with active offers
-    // We also use EXISTS on offer_usages to see if THIS user applied the offer
+
+    // Simplified query focusing only on the specific restaurant and cart status
     const [products] = await connection.execute(`
       SELECT 
         p.*,
-        c.name as category_name,
-        o.id as offer_id,
-        o.name as offer_name,
-        o.discount_type,
-        o.discount as offer_discount,
-        o.end_at as offer_valid_until,
-        op.limited_use,
-        op.times_used,
-        EXISTS(SELECT 1 FROM offer_usages ou WHERE ou.offer_id = o.id AND ou.user_id = ?) as is_applied_by_user
+        c.name as category_name
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN offer_products op ON p.id = op.product_id
-      LEFT JOIN offers o ON op.offer_id = o.id 
-        AND o.is_active = TRUE 
-        AND o.start_at <= NOW() 
-        AND o.end_at > NOW()
       WHERE p.for_cart = TRUE 
         AND p.active = TRUE
+        AND p.restaurant_id = ?
       ORDER BY p.created_at DESC
-    `, [userId || null]);
-    
-    // Process the products to calculate final prices and set frontend flags
-    const processedProducts = products.map(p => {
-      const productPrice = parseFloat(p.price);
-      const discountValue = parseFloat(p.offer_discount);
-      const userHasApplied = Boolean(p.is_applied_by_user);
-      
-      // Check global restaurant limit
-      const globalLimitNotReached = p.limited_use === null || p.times_used < p.limited_use;
-      
-      // The frontend recognizes it as an "Active Discount" only if applied and not sold out
-      const hasActiveOffer = p.offer_id !== null;
-      const discountApplied = hasActiveOffer && userHasApplied && globalLimitNotReached;
+    `, [restaurant_id]);
 
-      let finalPrice = productPrice;
-      if (discountApplied) {
-        if (p.discount_type === 'percentage') {
-          finalPrice = productPrice * (1 - discountValue / 100);
-        } else {
-          finalPrice = Math.max(0.01, productPrice - discountValue);
-        }
-      }
+    // Map through products to ensure price is a number (SQL often returns strings for Decimals)
+    const processedProducts = products.map(p => ({
+      ...p,
+      price: parseFloat(p.price)
+    }));
 
-      return {
-        ...p,
-        price: productPrice,
-        final_price: parseFloat(finalPrice.toFixed(2)),
-        has_offer: hasActiveOffer,
-        discount_applied: discountApplied,
-        // Offer details for the frontend to display badges/labels
-        offer_info: hasActiveOffer ? {
-          offer_id: p.offer_id,
-          offer_name: p.offer_name,
-          discount_type: p.discount_type,
-          discount_value: discountValue,
-          is_applied: userHasApplied,
-          can_use: globalLimitNotReached,
-          reason: !userHasApplied ? 'Offer not applied' : (!globalLimitNotReached ? 'Limit reached' : null)
-        } : null
-      };
-    });
-    
     res.json({
       success: true,
       count: processedProducts.length,
       products: processedProducts
     });
-    
+
   } catch (error) {
     console.error('Error fetching cart products:', error);
     res.status(500).json({ 
@@ -2045,5 +2011,587 @@ export const checkLiveStatus = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   } finally {
     if (connection) connection.release();
+  }
+};
+
+
+
+// Add new address for a client
+export const addAddress = async (req, res) => {
+  let connection;
+  try {
+    // Get token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: "Authorization token required"
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // Verify and decode token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token"
+      });
+    }
+
+    // Extract client ID from token
+    const clientId = decoded.clientId || decoded.id;
+    if (!clientId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token: No client ID found"
+      });
+    }
+
+    const {
+      title = 'New Address', // Default title
+      full_address,
+      lat,
+      lon,
+      is_default = false
+    } = req.body;
+
+    // Validate required fields
+    if (!full_address) {
+      return res.status(400).json({
+        success: false,
+        message: "Full address is required"
+      });
+    }
+
+    // Validate coordinates if provided
+    if (lat && (lat < -90 || lat > 90)) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude must be between -90 and 90"
+      });
+    }
+    
+    if (lon && (lon < -180 || lon > 180)) {
+      return res.status(400).json({
+        success: false,
+        message: "Longitude must be between -180 and 180"
+      });
+    }
+
+    // Check if client exists
+    connection = await pool.getConnection();
+    
+    const [clientRows] = await connection.execute(
+      "SELECT id FROM clients WHERE id = ?",
+      [clientId]
+    );
+
+    if (clientRows.length === 0) {
+      connection.release();
+      return res.status(404).json({
+        success: false,
+        message: "Client not found"
+      });
+    }
+
+    // Check if address already exists for this client
+    // Using LOWER() for case-insensitive comparison and trimming whitespace
+    const [existingAddressRows] = await connection.execute(
+      `SELECT id, full_address 
+       FROM addresses 
+       WHERE user_id = ? 
+       AND LOWER(TRIM(full_address)) = LOWER(TRIM(?))`,
+      [clientId, full_address]
+    );
+
+    if (existingAddressRows.length > 0) {
+      connection.release();
+      return res.status(409).json({
+        success: false,
+        message: "Address already exists",
+        existingAddressId: existingAddressRows[0].id
+      });
+    }
+
+    // If setting as default, unset all other default addresses for this client
+    if (is_default) {
+      await connection.execute(
+        "UPDATE addresses SET is_default = FALSE WHERE user_id = ?",
+        [clientId]
+      );
+    }
+
+    // Insert new address
+    const [result] = await connection.execute(
+      `INSERT INTO addresses (
+        user_id,
+        title,
+        full_address,
+        lat,
+        lon,
+        is_default
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        clientId,
+        title,
+        full_address.trim(), // Trim whitespace before storing
+        lat ? parseFloat(lat) : null,
+        lon ? parseFloat(lon) : null,
+        is_default
+      ]
+    );
+
+    // If this is the first address and no default was set, make it default
+    const [addressCount] = await connection.execute(
+      "SELECT COUNT(*) as count FROM addresses WHERE user_id = ?",
+      [clientId]
+    );
+
+    if (addressCount[0].count === 1 && !is_default) {
+      await connection.execute(
+        "UPDATE addresses SET is_default = TRUE WHERE id = ?",
+        [result.insertId]
+      );
+    }
+
+    // Get the newly created address with formatted dates
+    const [newAddressRows] = await connection.execute(
+      `SELECT 
+        id,
+        title,
+        full_address,
+        lat,
+        lon,
+        is_default,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM addresses 
+      WHERE id = ?`,
+      [result.insertId]
+    );
+
+    connection.release();
+
+    const newAddress = {
+      ...newAddressRows[0],
+      lat: newAddressRows[0].lat ? parseFloat(newAddressRows[0].lat) : null,
+      lon: newAddressRows[0].lon ? parseFloat(newAddressRows[0].lon) : null,
+      is_default: Boolean(newAddressRows[0].is_default)
+    };
+
+    res.status(201).json({
+      success: true,
+      message: "Address added successfully",
+      address: newAddress
+    });
+
+  } catch (error) {
+    console.error("❌ Error adding address:", error.message);
+    if (connection) connection.release();
+    
+    // Check for foreign key constraint error
+    if (error.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({
+        success: false,
+        message: "Client does not exist"
+      });
+    }
+    
+    // Check for duplicate address error (if database constraint exists)
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: "Address already exists for this client"
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: "Server error adding address",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
+// Get all addresses for a client (using token instead of clientId in params)
+export const getClientAddresses = async (req, res) => {
+  let connection;
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: "Authorization token required"
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // Verify and decode token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token"
+      });
+    }
+
+    const clientId = decoded.id || decoded.userId;
+    
+    if (!clientId) {
+      return res.status(400).json({
+        success: false,
+        message: "Client ID not found in token"
+      });
+    }
+
+    connection = await pool.getConnection();
+
+    // Check if client exists
+    const [clientRows] = await connection.execute(
+      "SELECT id, name, email FROM clients WHERE id = ?",
+      [clientId]
+    );
+
+    if (clientRows.length === 0) {
+      connection.release();
+      return res.status(404).json({
+        success: false,
+        message: "Client not found"
+      });
+    }
+
+    // Get all addresses for this client
+    const [addresses] = await connection.execute(
+      `SELECT 
+        id,
+        title,
+        full_address,
+        lat,
+        lon,
+        is_default,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM addresses 
+      WHERE user_id = ?
+      ORDER BY is_default DESC, created_at DESC`,
+      [clientId]
+    );
+
+    connection.release();
+
+    const formattedAddresses = addresses.map(addr => ({
+      ...addr,
+      lat: addr.lat ? parseFloat(addr.lat) : null,
+      lon: addr.lon ? parseFloat(addr.lon) : null,
+      is_default: Boolean(addr.is_default)
+    }));
+
+    res.json({
+      success: true,
+      client: {
+        id: clientRows[0].id,
+        name: clientRows[0].name,
+        email: clientRows[0].email
+      },
+      addresses: formattedAddresses,
+      count: addresses.length,
+      has_default: addresses.some(addr => addr.is_default)
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching client addresses:", error.message);
+    if (connection) connection.release();
+    
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching addresses",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Update an address
+export const updateAddress = async (req, res) => {
+  let connection;
+  try {
+    const { clientId, addressId } = req.params;
+    const {
+      title,
+      full_address,
+      lat,
+      lon,
+      is_default = false
+    } = req.body;
+
+    // Validate required fields
+    if (!title || !full_address) {
+      return res.status(400).json({
+        success: false,
+        message: "Title and full address are required"
+      });
+    }
+
+    // Validate coordinates if provided
+    if (lat && (lat < -90 || lat > 90)) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude must be between -90 and 90"
+      });
+    }
+    
+    if (lon && (lon < -180 || lon > 180)) {
+      return res.status(400).json({
+        success: false,
+        message: "Longitude must be between -180 and 180"
+      });
+    }
+
+    connection = await pool.getConnection();
+
+    // Check if address exists and belongs to this client
+    const [addressRows] = await connection.execute(
+      "SELECT id, is_default FROM addresses WHERE id = ? AND user_id = ?",
+      [addressId, clientId]
+    );
+
+    if (addressRows.length === 0) {
+      connection.release();
+      return res.status(404).json({
+        success: false,
+        message: "Address not found or doesn't belong to this client"
+      });
+    }
+
+    const currentIsDefault = addressRows[0].is_default;
+
+    // If setting as default and it wasn't already default, unset all other default addresses
+    if (is_default && !currentIsDefault) {
+      await connection.execute(
+        "UPDATE addresses SET is_default = FALSE WHERE user_id = ? AND id != ?",
+        [clientId, addressId]
+      );
+    }
+
+    // Update the address
+    await connection.execute(
+      `UPDATE addresses SET
+        title = ?,
+        full_address = ?,
+        lat = ?,
+        lon = ?,
+        is_default = ?
+      WHERE id = ? AND user_id = ?`,
+      [
+        title,
+        full_address,
+        lat ? parseFloat(lat) : null,
+        lon ? parseFloat(lon) : null,
+        is_default,
+        addressId,
+        clientId
+      ]
+    );
+
+    // Get the updated address
+    const [updatedAddressRows] = await connection.execute(
+      `SELECT 
+        id,
+        title,
+        full_address,
+        lat,
+        lon,
+        is_default,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM addresses 
+      WHERE id = ?`,
+      [addressId]
+    );
+
+    connection.release();
+
+    const updatedAddress = {
+      ...updatedAddressRows[0],
+      lat: updatedAddressRows[0].lat ? parseFloat(updatedAddressRows[0].lat) : null,
+      lon: updatedAddressRows[0].lon ? parseFloat(updatedAddressRows[0].lon) : null,
+      is_default: Boolean(updatedAddressRows[0].is_default)
+    };
+
+    res.json({
+      success: true,
+      message: "Address updated successfully",
+      address: updatedAddress
+    });
+
+  } catch (error) {
+    console.error("❌ Error updating address:", error.message);
+    if (connection) connection.release();
+    
+    res.status(500).json({
+      success: false,
+      message: "Server error updating address",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Delete an address
+export const deleteAddress = async (req, res) => {
+  let connection;
+  try {
+    const { clientId, addressId } = req.params;
+
+    connection = await pool.getConnection();
+
+    // Check if address exists and belongs to this client
+    const [addressRows] = await connection.execute(
+      "SELECT id, is_default FROM addresses WHERE id = ? AND user_id = ?",
+      [addressId, clientId]
+    );
+
+    if (addressRows.length === 0) {
+      connection.release();
+      return res.status(404).json({
+        success: false,
+        message: "Address not found or doesn't belong to this client"
+      });
+    }
+
+    const isDefault = addressRows[0].is_default;
+
+    // Delete the address
+    await connection.execute(
+      "DELETE FROM addresses WHERE id = ? AND user_id = ?",
+      [addressId, clientId]
+    );
+
+    // If we deleted the default address, set a new default (the most recent one)
+    if (isDefault) {
+      const [remainingAddresses] = await connection.execute(
+        "SELECT id FROM addresses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        [clientId]
+      );
+
+      if (remainingAddresses.length > 0) {
+        await connection.execute(
+          "UPDATE addresses SET is_default = TRUE WHERE id = ?",
+          [remainingAddresses[0].id]
+        );
+      }
+    }
+
+    connection.release();
+
+    res.json({
+      success: true,
+      message: "Address deleted successfully",
+      deletedAddressId: addressId
+    });
+
+  } catch (error) {
+    console.error("❌ Error deleting address:", error.message);
+    if (connection) connection.release();
+    
+    res.status(500).json({
+      success: false,
+      message: "Server error deleting address",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Set default address
+export const setDefaultAddress = async (req, res) => {
+  let connection;
+  try {
+    const { clientId, addressId } = req.params;
+
+    connection = await pool.getConnection();
+
+    // Check if address exists and belongs to this client
+    const [addressRows] = await connection.execute(
+      "SELECT id, is_default FROM addresses WHERE id = ? AND user_id = ?",
+      [addressId, clientId]
+    );
+
+    if (addressRows.length === 0) {
+      connection.release();
+      return res.status(404).json({
+        success: false,
+        message: "Address not found or doesn't belong to this client"
+      });
+    }
+
+    const currentIsDefault = addressRows[0].is_default;
+
+    // If already default, no need to do anything
+    if (currentIsDefault) {
+      connection.release();
+      return res.json({
+        success: true,
+        message: "Address is already the default address"
+      });
+    }
+
+    // Unset all other default addresses
+    await connection.execute(
+      "UPDATE addresses SET is_default = FALSE WHERE user_id = ?",
+      [clientId]
+    );
+
+    // Set this address as default
+    await connection.execute(
+      "UPDATE addresses SET is_default = TRUE WHERE id = ? AND user_id = ?",
+      [addressId, clientId]
+    );
+
+    // Get the updated default address
+    const [defaultAddressRows] = await connection.execute(
+      `SELECT 
+        id,
+        title,
+        full_address,
+        lat,
+        lon,
+        is_default,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM addresses 
+      WHERE id = ?`,
+      [addressId]
+    );
+
+    connection.release();
+
+    const defaultAddress = {
+      ...defaultAddressRows[0],
+      lat: defaultAddressRows[0].lat ? parseFloat(defaultAddressRows[0].lat) : null,
+      lon: defaultAddressRows[0].lon ? parseFloat(defaultAddressRows[0].lon) : null,
+      is_default: Boolean(defaultAddressRows[0].is_default)
+    };
+
+    res.json({
+      success: true,
+      message: "Default address updated successfully",
+      address: defaultAddress
+    });
+
+  } catch (error) {
+    console.error("❌ Error setting default address:", error.message);
+    if (connection) connection.release();
+    
+    res.status(500).json({
+      success: false,
+      message: "Server error setting default address",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };

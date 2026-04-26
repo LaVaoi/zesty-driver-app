@@ -7,95 +7,84 @@ import { calculateDistance } from "../utils/distanceCalculator.js";
  * @param {number} clientLon - Client longitude
  * @returns {Promise<{fee: number, distance: number, error: string|null}>}
  */
-export const calculateDeliveryFee = async (clientLat, clientLon) => {
+
+export const calculateDeliveryFee = async (clientLat, clientLon, restaurantId) => {
+  let connection;
   try {
-    // Get restaurant settings
-    const connection = await pool.getConnection();
-    const [settings] = await connection.execute(
+    if (!restaurantId) return { fee: "15.00", distance: null, error: "No Restaurant ID" };
+
+    connection = await pool.getConnection();
+
+    // 1. Fetch restaurant settings from your updated table
+    const [rows] = await connection.execute(
       `SELECT 
-        restaurant_latitude, 
-        restaurant_longitude,
-        base_delivery_fee,
-        per_km_fee,
-        max_delivery_distance_km,
-        min_delivery_fee,
-        max_delivery_fee
-      FROM restaurant_settings 
-      LIMIT 1`
+        lat, lon, 
+        base_delivery_fee, 
+        per_km_fee, 
+        max_delivery_distance_km, 
+        min_delivery_fee, 
+        max_delivery_fee 
+       FROM restaurants 
+       WHERE id = ? LIMIT 1`,
+      [restaurantId]
     );
-    connection.release();
 
-    if (settings.length === 0) {
-      return {
-        fee: 15.00, // Default fallback
-        distance: null,
-        error: "Restaurant settings not found, using default fee",
-      };
+    if (rows.length === 0) {
+      return { fee: "15.00", distance: null, error: "Restaurant not found" };
     }
 
-    const restaurantSettings = settings[0];
+    const res = rows[0];
 
-    // Check if client coordinates are available
-    if (!clientLat || !clientLon) {
-      return {
-        fee: parseFloat(restaurantSettings.base_delivery_fee),
-        distance: null,
-        error: "Client location not available, using base fee",
-      };
-    }
-
-    // Calculate distance
-    const distance = calculateDistance(
-      parseFloat(restaurantSettings.restaurant_latitude),
-      parseFloat(restaurantSettings.restaurant_longitude),
+    // 2. Calculate "Air Distance" and apply the 1.3x Road Buffer
+    const straightLine = calculateDistance(
+      parseFloat(res.lat),
+      parseFloat(res.lon),
       parseFloat(clientLat),
       parseFloat(clientLon)
     );
+    
+    // This matches the ~1.5km you see on your homepage
+    const roadDistance = straightLine * 1.3;
 
-    if (distance === null) {
-      return {
-        fee: parseFloat(restaurantSettings.base_delivery_fee),
-        distance: null,
-        error: "Could not calculate distance, using base fee",
-      };
-    }
-
-    // Check if distance exceeds maximum
-    if (distance > parseFloat(restaurantSettings.max_delivery_distance_km)) {
+    // 3. Distance Limit Check
+    const maxDist = parseFloat(res.max_delivery_distance_km || 20);
+    if (roadDistance > maxDist) {
       return {
         fee: null,
-        distance: distance,
-        error: `Delivery distance (${distance} km) exceeds maximum allowed distance (${restaurantSettings.max_delivery_distance_km} km)`,
+        distance: Math.round(roadDistance * 100) / 100,
+        error: `Out of delivery range (${roadDistance.toFixed(1)}km)`
       };
     }
 
-    // Calculate fee: base fee + (distance * per_km_fee)
-    let calculatedFee =
-      parseFloat(restaurantSettings.base_delivery_fee) +
-      distance * parseFloat(restaurantSettings.per_km_fee);
+    // 4. Calculate Fee: Base + (Dist * Rate)
+    // Example: 7 + (1.508 * 2) = 10.016
+    const base = parseFloat(res.base_delivery_fee || 0);
+    const rate = parseFloat(res.per_km_fee || 0);
+    let totalFee = base + (roadDistance * rate);
 
-    // Apply min/max constraints
-    const minFee = parseFloat(restaurantSettings.min_delivery_fee);
-    const maxFee = parseFloat(restaurantSettings.max_delivery_fee);
+    // 5. Apply your Rounding Logic
+    // .5 and up -> next whole number
+    // .49 and down -> floor whole number
+    totalFee = Math.round(totalFee);
 
-    if (calculatedFee < minFee) {
-      calculatedFee = minFee;
-    } else if (calculatedFee > maxFee) {
-      calculatedFee = maxFee;
-    }
+    // 6. Final constraints (Min/Max)
+    const minF = parseFloat(res.min_delivery_fee || 0);
+    const maxF = parseFloat(res.max_delivery_fee || 999);
+
+    if (totalFee < minF) totalFee = minF;
+    if (totalFee > maxF) totalFee = maxF;
 
     return {
-      fee: Math.round(calculatedFee * 100) / 100, // Round to 2 decimal places
-      distance: distance,
+      fee: totalFee.toFixed(2), // Returns "10.00" or "11.00"
+      distance: Math.round(roadDistance * 100) / 100,
       error: null,
     };
+
   } catch (error) {
-    console.error("Error calculating delivery fee:", error);
-    return {
-      fee: 15.00, // Default fallback
-      distance: null,
-      error: "Error calculating delivery fee, using default",
-    };
+    console.error("Delivery Calculation Error:", error.message);
+    return { fee: "15.00", distance: null, error: error.message };
+  } finally {
+    if (connection) connection.release();
   }
 };
 

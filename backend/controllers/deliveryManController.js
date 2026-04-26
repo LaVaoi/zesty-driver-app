@@ -151,7 +151,8 @@ export const getDashboardMetrics = async (req, res) => {
 
     // Get deliveryManId from JWT token (should be set by your auth middleware)
     const deliveryManId = req.deliveryManId || req.user?.id;
-
+    console.log('zap delivery man id : ', deliveryManId);
+    
     if (!deliveryManId) {
       return res.status(401).json({ message: "Delivery man ID not found in request" });
     }
@@ -361,19 +362,22 @@ export const getDashboardMetrics = async (req, res) => {
 
 // Get my assigned orders
 export const getMyOrders = async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     const [orders] = await connection.execute(
       `SELECT 
         o.id, o.order_number, o.lat, o.lon, o.status, o.delivery_address, o.final_price, 
         o.delivery_fee, o.payment_status, o.created_at, o.delivery_man_id,
         c.name as customer_name, c.phone as customer_phone, c.email as customer_email,
+        r.lat as restaurant_lat, r.lon as restaurant_lon, r.name as restaurant_name, r.logo as restaurant_logo,
         GROUP_CONCAT(
           CONCAT(oi.quantity, 'x ', p.name, ' (', oi.price_per_unit, ' MAD)')
         ) as items_summary
       FROM orders o
       LEFT JOIN clients c ON o.user_id = c.id
+      LEFT JOIN restaurants r ON o.restaurant_id = r.id -- Join with restaurants table
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE o.delivery_man_id = ?
@@ -404,11 +408,12 @@ export const getMyOrders = async (req, res) => {
       })
     );
 
-    connection.release();
     res.json({ orders: ordersWithItems });
   } catch (error) {
     console.error("Error fetching my orders:", error);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    if (connection) connection.release(); // Ensure connection is released even if error occurs
   }
 };
 

@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+// app/(tabs)/orders.tsx
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import * as Linking from 'expo-linking';
 import {
   View,
   Text,
@@ -11,6 +13,8 @@ import {
   Platform,
   Modal,
   Dimensions,
+  Pressable,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,25 +22,78 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
-import * as Linking from 'expo-linking';
 import { WebView } from 'react-native-webview';
 import Colors from '@/constants/Colors';
-import { OrderCardSkeleton, Skeleton } from '@/components/ui/skeleton';
+import { OrderCardSkeleton } from '@/components/ui/skeleton';
 import { realtimeService } from '../services/realtimeService';
+import { useLanguage } from '@/constants/contexts/LanguageContext';
 
 const { width } = Dimensions.get('window');
 
+// ─────────────────────────────────────────────
+// Design System  (unchanged)
+// ─────────────────────────────────────────────
+const DS = {
+  colors: {
+    bg: '#0D0F12',
+    bgCard: '#161A20',
+    bgCardAlt: '#1C2128',
+    accent: '#39E97B',
+    accentDim: '#39E97B18',
+    accentBorder: '#39E97B44',
+    blue: '#60A5FA',
+    blueDim: '#60A5FA18',
+    amber: '#F59E0B',
+    amberDim: '#F59E0B18',
+    orange: '#FB923C',
+    orangeDim: '#FB923C18',
+    danger: '#EF4444',
+    dangerDim: '#EF444418',
+    purple: '#A78BFA',
+    purpleDim: '#A78BFA18',
+    white: '#FFFFFF',
+    gray1: '#E8EAED',
+    gray2: '#9CA3AF',
+    gray3: '#4B5563',
+    sep: '#1F2937',
+    headerTop: '#0A0C0F',
+    headerBot: '#161A20',
+  },
+  sp: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
+  r: { sm: 8, md: 12, lg: 16, xl: 20, round: 999 },
+  shadow: Platform.select({
+    ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12 },
+    android: { elevation: 8 },
+  }),
+};
+
+// ─────────────────────────────────────────────
+// Interfaces  (unchanged)
+// ─────────────────────────────────────────────
 interface OrderItem {
   product_name: string;
   quantity: number;
   price: number;
   image?: string;
+  // Size fields (present when item has a size selected)
+  size_id?: string | null;
+  size_name?: string | null;
+  size_price?: number | null;
+}
+
+interface OrderDeal {
+  deal_id: number;
+  deal_name: string;
+  quantity: number;
+  deal_price: number;
+  real_price_deal: number;
 }
 
 interface Order {
   id: number;
   order_number: string;
-  status: string;
+  order_status: string;
+  delivery_status?: string | null;
   delivery_address: string;
   final_price: number;
   delivery_fee?: number;
@@ -46,9 +103,13 @@ interface Order {
   customer_phone: string;
   customer_email: string;
   items: OrderItem[];
+  deals?: OrderDeal[];
+  order_type?: 'order' | 'deal' | 'both';
   delivery_man_id?: number | null;
   delivered_at?: string;
-  out_for_delivery_at?: string;
+  assigned_at?: string;
+  pick_up_at?: string;
+  ready_for_delivery_at?: string;
   rating?: {
     id: number;
     rating: number;
@@ -57,566 +118,840 @@ interface Order {
   };
   lat?: number;
   lon?: number;
+  restaurant_lat?: number;
+  restaurant_lon?: number;
+  restaurant_name?: string;
+  restaurant_logo?: string;
 }
 
-type TabType = 'accepted' | 'delivered';
+type TabType = 'accepted' | 'availableOrders' | 'delivered';
+type MapType = 'delivery' | 'restaurant';
 
-// Premium Status Badge Component
-const StatusBadge = ({ status }: { status: string }) => {
+// ─────────────────────────────────────────────
+// getPrettyStatus — now accepts translation object
+// ─────────────────────────────────────────────
+const getPrettyStatus = (
+  order: Order,
+  ot: ReturnType<typeof useLanguage>['t']['orders'],
+) => {
+  if (order.order_status === 'delivered' && order.delivery_status === 'delivered')
+    return ot.statusDelivered;
+  if (order.delivery_status === 'pick_up') return ot.statusOnRoad;
+  if (order.delivery_status === 'assigned') {
+    if (order.order_status === 'preparing') return ot.statusPreparing;
+    if (order.order_status === 'accepted')  return ot.statusAssigned;
+    return ot.statusAssigned;
+  }
+  if (order.order_status === 'accepted')  return ot.statusAccepted;
+  if (order.order_status === 'preparing') return ot.statusPreparing;
+  if (order.order_status === 'cancelled' || order.delivery_status === 'cancelled')
+    return ot.statusCancelled;
+  return order.order_status || ot.statusUnknown;
+};
+
+// ─────────────────────────────────────────────
+// StatusBadge
+// ─────────────────────────────────────────────
+const StatusBadge = ({
+  order,
+  ot,
+}: {
+  order: Order;
+  ot: ReturnType<typeof useLanguage>['t']['orders'];
+}) => {
+  const label = getPrettyStatus(order, ot);
+
   const getStatusConfig = () => {
-    switch (status) {
-      case 'Pending':
-      case 'Preparing':
-        return {
-          bg: '#FEF3E2',
-          color: '#F97316',
-          icon: 'time-outline',
-          label: status
-        };
-      case 'OutForDelivery':
-        return {
-          bg: '#E3F2FD',
-          color: '#2196F3',
-          icon: 'bicycle-outline',
-          label: 'Out for Delivery'
-        };
-      case 'Delivered':
-        return {
-          bg: '#E8F5E9',
-          color: '#2E7D32',
-          icon: 'checkmark-circle-outline',
-          label: 'Delivered'
-        };
-      default:
-        return {
-          bg: '#F3F4F6',
-          color: '#6B7280',
-          icon: 'ellipse-outline',
-          label: status
-        };
+    if (order.order_status === 'delivered' && order.delivery_status === 'delivered') {
+      return { bg: DS.colors.accentDim, color: DS.colors.accent, border: DS.colors.accentBorder, icon: 'checkmark-circle-outline', label: ot.statusDelivered };
     }
+    if (order.delivery_status === 'pick_up') {
+      return { bg: DS.colors.blueDim, color: DS.colors.blue, border: DS.colors.blue + '44', icon: 'bicycle-outline', label: ot.statusOnRoad };
+    }
+    if (order.delivery_status === 'assigned') {
+      return { bg: DS.colors.amberDim, color: DS.colors.amber, border: DS.colors.amber + '44', icon: 'time-outline', label };
+    }
+    if (order.order_status === 'cancelled' || order.delivery_status === 'cancelled') {
+      return { bg: DS.colors.dangerDim, color: DS.colors.danger, border: DS.colors.danger + '44', icon: 'close-circle-outline', label: ot.statusCancelled };
+    }
+    return { bg: DS.colors.bgCardAlt, color: DS.colors.gray2, border: DS.colors.sep, icon: 'ellipse-outline', label };
   };
 
   const config = getStatusConfig();
-
   return (
-    <View style={[styles.statusBadge, { backgroundColor: config.bg }]}>
-      <Ionicons name={config.icon as any} size={14} color={config.color} />
-      <Text style={[styles.statusText, { color: config.color }]}>{config.label}</Text>
+    <View style={[sc.badge, { backgroundColor: config.bg, borderColor: config.border }]}>
+      <Ionicons name={config.icon as any} size={12} color={config.color} />
+      <Text style={[sc.badgeText, { color: config.color }]}>{config.label}</Text>
     </View>
   );
 };
 
-// Premium Action Button Component
+// ─────────────────────────────────────────────
+// ActionButton  (unchanged logic, no strings)
+// ─────────────────────────────────────────────
 const ActionButton = ({
-  title,
-  icon,
-  onPress,
-  variant = 'primary',
-  loading = false,
-  disabled = false,
+  title, icon, onPress, variant = 'primary', loading = false, disabled = false,
 }: {
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'destructive';
-  loading?: boolean;
-  disabled?: boolean;
+  title: string; icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void; variant?: 'primary' | 'secondary' | 'destructive';
+  loading?: boolean; disabled?: boolean;
 }) => {
   const getVariantStyles = () => {
     switch (variant) {
-      case 'primary':
-        return {
-          bg: Colors.primary,
-          text: Colors.dark,
-          border: Colors.primary,
-        };
-      case 'secondary':
-        return {
-          bg: '#FEF3E2',
-          text: '#F97316',
-          border: '#FED7AA',
-        };
-      case 'destructive':
-        return {
-          bg: '#FEE2E2',
-          text: '#DC2626',
-          border: '#FECACA',
-        };
+      case 'primary':     return { bg: DS.colors.accent,    activeBg: '#2dd068',                  text: DS.colors.bg,     border: DS.colors.accent };
+      case 'secondary':   return { bg: DS.colors.blueDim,   activeBg: DS.colors.blue + '30',      text: DS.colors.blue,   border: DS.colors.blue + '44' };
+      case 'destructive': return { bg: DS.colors.dangerDim, activeBg: DS.colors.danger + '30',    text: DS.colors.danger, border: DS.colors.danger + '44' };
     }
   };
-
-  const styles = getVariantStyles();
-
+  const v = getVariantStyles();
   return (
-    <TouchableOpacity
-      style={[
-        localStyles.actionButton,
-        {
-          backgroundColor: styles.bg,
-          borderColor: styles.border,
-          opacity: disabled ? 0.5 : 1,
-        },
+    <Pressable
+      style={({ pressed }) => [
+        sc.actionBtn,
+        { backgroundColor: pressed ? v.activeBg : v.bg, borderColor: v.border, opacity: disabled ? 0.5 : 1, transform: pressed ? [{ scale: 0.97 }] : [{ scale: 1 }] },
       ]}
       onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.7}>
-      {loading ? (
-        <ActivityIndicator size="small" color={styles.text} />
-      ) : (
-        <>
-          <Ionicons name={icon} size={18} color={styles.text} />
-          <Text style={[localStyles.actionButtonText, { color: styles.text }]}>{title}</Text>
-        </>
-      )}
-    </TouchableOpacity>
+    >
+      {loading
+        ? <ActivityIndicator size="small" color={v.text} />
+        : (<><Ionicons name={icon} size={16} color={v.text} /><Text style={[sc.actionBtnText, { color: v.text }]}>{title}</Text></>)
+      }
+    </Pressable>
   );
 };
 
-// Premium Stat Card Component
+// ─────────────────────────────────────────────
+// StatCard  (label comes from caller)
+// ─────────────────────────────────────────────
 const StatCard = ({ icon, value, label, color }: { icon: any; value: string; label: string; color: string }) => (
-  <View style={localStyles.statCard}>
-    <View style={[localStyles.statIconContainer, { backgroundColor: `${color}15` }]}>
-      <Ionicons name={icon} size={20} color={color} />
+  <View style={[sc.statCard, DS.shadow]}>
+    <View style={[sc.statIconWrap, { backgroundColor: color + '18' }]}>
+      <Ionicons name={icon} size={18} color={color} />
     </View>
-    <View style={localStyles.statContent}>
-      <Text style={localStyles.statValue}>{value}</Text>
-      <Text style={localStyles.statLabel}>{label}</Text>
-    </View>
+    <Text style={sc.statVal}>{value}</Text>
+    <Text style={sc.statLbl}>{label}</Text>
   </View>
 );
 
-// Premium Order Card Component
+// ─────────────────────────────────────────────
+// PlaceholderDots
+// ─────────────────────────────────────────────
+const PlaceholderDots = ({ length = 20 }: { length?: number }) => (
+  <Text style={sc.dots}>{'•'.repeat(length)}</Text>
+);
+
+// ─────────────────────────────────────────────
+// OrderCard
+// ─────────────────────────────────────────────
 const OrderCard = React.memo(({
-  order,
-  showActions = true,
-  onShowLocation,
-  onAccept,
-  onMarkDelivered,
-  updatingStatus,
-  tabType,
+  order, showActions = true,
+  onShowLocation, onShowRestaurantLocation,
+  onAccept, onPickUp, onMarkDelivered,
+  updatingStatus, tabType, ot, isRTL, hasActiveOrders,
 }: {
-  order: Order;
-  showActions?: boolean;
+  order: Order; showActions?: boolean;
   onShowLocation: (order: Order) => void;
+  onShowRestaurantLocation?: (order: Order) => void;
   onAccept?: (id: number) => void;
+  onPickUp?: (id: number) => void;
   onMarkDelivered?: (id: number) => void;
   updatingStatus?: number | null;
   tabType?: TabType;
+  ot: ReturnType<typeof useLanguage>['t']['orders'];
+  isRTL: boolean;
+  hasActiveOrders?: boolean;
 }) => {
-  const getPaymentIcon = useCallback((paymentStatus: string) => {
-    return paymentStatus === 'Paid' ? 'card-outline' : 'cash-outline';
-  }, []);
+  const getPaymentIcon  = useCallback((ps: string) => (ps === 'Paid' ? 'card-outline' : 'cash-outline'), []);
+  const getPaymentColor = useCallback((ps: string) => (ps === 'Paid' ? DS.colors.accent : DS.colors.orange), []);
 
-  const getPaymentColor = useCallback((paymentStatus: string) => {
-    return paymentStatus === 'Paid' ? '#10B981' : '#F97316';
-  }, []);
+  const isHidden = order.delivery_man_id == null;
+
+  const showAcceptBtn   = tabType === 'availableOrders' && !!onAccept;
+  const showPickUpBtn   = tabType === 'accepted' && order.delivery_status === 'assigned' && order.order_status === 'ready_for_delivery' && !!onPickUp;
+  const showDeliveredBtn= tabType === 'accepted' && order.delivery_status === 'pick_up' && !!onMarkDelivered;
+  const showRestaurantBtn= tabType === 'accepted' && order.delivery_status === 'assigned' && !!onShowRestaurantLocation;
+  const showCustomerBtn = tabType === 'accepted' && order.delivery_status === 'pick_up';
+
+  const activeButtonCount =
+    (showAcceptBtn ? 1 : 0) + (showPickUpBtn ? 1 : 0) +
+    (showDeliveredBtn ? 1 : 0) + (showRestaurantBtn ? 1 : 0) + (showCustomerBtn ? 1 : 0);
+
+  const accentColor =
+    order.delivery_status === 'pick_up'  ? DS.colors.blue  :
+    order.delivery_status === 'assigned' ? DS.colors.amber :
+    DS.colors.accent;
+
+  // Payment label
+  const paymentLabel = order.payment_status === 'Paid' ? ot.paid : ot.cashOnDelivery;
 
   return (
-    <View style={localStyles.orderCard}>
-      {/* Card Header */}
-      <View style={localStyles.cardHeader}>
-        <View style={localStyles.orderInfo}>
-          <View style={localStyles.orderNumberRow}>
-            <Ionicons name="receipt-outline" size={16} color={Colors.primary} />
-            <Text style={localStyles.orderNumber}>{order.order_number}</Text>
+    <View style={[sc.card, DS.shadow]}>
+      <View style={[sc.cardAccentBar, { backgroundColor: accentColor }]} />
+      <View style={sc.cardBody}>
+        <View style={[sc.cardHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+          <View style={sc.cardHeaderLeft}>
+            <View style={[sc.orderNumRow, isRTL && { flexDirection: 'row-reverse' }]}>
+              <Ionicons name="receipt-outline" size={13} color={DS.colors.accent} />
+              <Text style={[sc.orderNum, isRTL && { textAlign: 'right' }]}>{order.order_number}</Text>
+            </View>
+            {isHidden
+              ? <PlaceholderDots length={12} />
+              : <Text style={[sc.customerName, isRTL && { textAlign: 'right' }]}>{order.customer_name || 'Customer'}</Text>
+            }
           </View>
-          <Text style={localStyles.customerName}>{order.customer_name || 'Customer'}</Text>
-        </View>
-        <StatusBadge status={order.status} />
-      </View>
-
-      {/* Items Preview */}
-      {order.items && order.items.length > 0 && (
-        <View style={localStyles.itemsPreview}>
-          <View style={localStyles.itemsHeader}>
-            <Ionicons name="basket-outline" size={14} color={Colors.text.secondary} />
-            <Text style={localStyles.itemsCount}>{order.items.length} items</Text>
-          </View>
-          <Text style={localStyles.itemsSummary} numberOfLines={2}>
-            {order.items.map(item => `${item.quantity}x ${item.product_name}`).join(' • ')}
-          </Text>
-        </View>
-      )}
-
-      {/* Delivery Details */}
-      <View style={localStyles.detailsGrid}>
-        <View style={localStyles.detailRow}>
-          <Ionicons name="location-outline" size={16} color={Colors.text.secondary} />
-          <Text style={localStyles.detailText} numberOfLines={2}>
-            {order.delivery_address || 'No address provided'}
-          </Text>
+          <StatusBadge order={order} ot={ot} />
         </View>
 
-        {order.customer_phone && (
-          <View style={localStyles.detailRow}>
-            <Ionicons name="call-outline" size={16} color={Colors.text.secondary} />
-            <Text style={localStyles.detailText}>{order.customer_phone}</Text>
+        {(tabType === 'accepted' || tabType === 'availableOrders') && order.restaurant_name && (
+          <View style={[sc.restaurantRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            <View style={sc.restaurantLogoWrap}>
+              {order.restaurant_logo ? (
+                <Image
+                  source={{ uri: order.restaurant_logo.startsWith('http') ? order.restaurant_logo : `https://ubua.cloud/${order.restaurant_logo}` }}
+                  style={sc.restaurantLogoImg}
+                />
+              ) : (
+                <Ionicons name="restaurant-outline" size={16} color={DS.colors.accent} />
+              )}
+            </View>
+            <Text style={[sc.restaurantName, isRTL && { textAlign: 'right' }]}>{order.restaurant_name}</Text>
           </View>
         )}
 
-        <View style={localStyles.paymentRow}>
-          <View style={localStyles.paymentMethod}>
-            <Ionicons
-              name={getPaymentIcon(order.payment_status) as any}
-              size={14}
-              color={getPaymentColor(order.payment_status)}
-            />
-            <Text style={[localStyles.paymentText, { color: getPaymentColor(order.payment_status) }]}>
-              {order.payment_status === 'Paid' ? 'Paid' : 'Cash on Delivery'}
-            </Text>
+        {/* ── Items / Deals box ── */}
+        {((order.items && order.items.length > 0) || (order.deals && order.deals.length > 0)) && (
+          <View style={sc.itemsBox}>
+            {/* Header row: shows total item count across both regular items and deals */}
+            <View style={[sc.itemsHeaderRow, isRTL && { flexDirection: 'row-reverse' }]}>
+              <Ionicons name="basket-outline" size={13} color={DS.colors.gray2} />
+              <Text style={sc.itemsCount}>
+                {ot.items(
+                  (order.items?.length ?? 0) + (order.deals?.length ?? 0)
+                )}
+              </Text>
+              {(order.order_type === 'deal' || order.order_type === 'both') && (
+                <View style={sc.dealTypeBadge}>
+                  <Ionicons name="pricetag-outline" size={10} color={DS.colors.purple} />
+                  <Text style={sc.dealTypeBadgeText}>
+                    {order.order_type === 'both' ? 'Deal + Items' : 'Deal'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {isHidden ? (
+              <PlaceholderDots length={30} />
+            ) : (
+              <>
+                {/* ── Deals section ── */}
+                {order.deals && order.deals.length > 0 && (
+                  <View style={sc.dealsList}>
+                    {order.deals.map((deal, idx) => (
+                      <View
+                        key={`deal-${deal.deal_id}-${idx}`}
+                        style={[sc.dealRow, isRTL && { flexDirection: 'row-reverse' }]}
+                      >
+                        <View style={sc.dealIconWrap}>
+                          <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
+                        </View>
+                        <View style={[sc.dealInfo, isRTL && { alignItems: 'flex-end' }]}>
+                          <Text style={[sc.dealName, isRTL && { textAlign: 'right' }]}>
+                            {deal.quantity}× Deal: {deal.deal_name}
+                          </Text>
+                          <View style={[sc.dealPriceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                            {deal.real_price_deal !== deal.deal_price && (
+                              <Text style={sc.dealOriginalPrice}>
+                                {(Number(deal.real_price_deal) * deal.quantity).toFixed(2)} MAD
+                              </Text>
+                            )}
+                            <Text style={sc.dealFinalPrice}>
+                              {(Number(deal.deal_price) * deal.quantity).toFixed(2)} MAD
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Divider between deals and regular items */}
+                {order.deals && order.deals.length > 0 && order.items && order.items.length > 0 && (
+                  <View style={sc.itemsDealDivider} />
+                )}
+
+                {/* ── Regular items (with optional size) ── */}
+                {order.items && order.items.length > 0 && (
+                  <View style={sc.regularItemsList}>
+                    {order.items.map((item, idx) => (
+                      <View
+                        key={`item-${idx}`}
+                        style={[sc.regularItemRow, isRTL && { flexDirection: 'row-reverse' }]}
+                      >
+                        <Text style={[sc.regularItemName, isRTL && { textAlign: 'right' }]}>
+                          {item.quantity}× {item.product_name}
+                        </Text>
+                        {item.size_name && (
+                          <View style={sc.sizeBadge}>
+                            <Text style={sc.sizeBadgeText}>{item.size_name}</Text>
+                          </View>
+                        )}
+                        <Text style={sc.regularItemPrice}>
+                          {(
+                            ((Number(item.price) || 0) + (Number(item.size_price) || 0)) *
+                            (Number(item.quantity) || 0)
+                          ).toFixed(2)} MAD
+                              </Text>
+                            </View>
+                          ))}
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
+        <View style={sc.detailsGrid}>
+          <View style={[sc.detailRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            <Ionicons name="location-outline" size={15} color={DS.colors.gray3} />
+            {isHidden
+              ? <PlaceholderDots length={25} />
+              : <Text style={[sc.detailText, isRTL && { textAlign: 'right' }]} numberOfLines={2}>
+                  {order.delivery_address || ot.noAddress}
+                </Text>
+            }
           </View>
 
-          {order.delivery_fee !== undefined && order.delivery_fee !== null && (
-            <View style={localStyles.deliveryFee}>
-              <Ionicons name="bicycle-outline" size={14} color={Colors.text.secondary} />
-              <Text style={localStyles.deliveryFeeText}>
-                +{(Number(order.delivery_fee) || 0).toFixed(2)} MAD
-              </Text>
-            </View>
+          {order.customer_phone && (
+            <TouchableOpacity
+              style={[sc.detailRow, isRTL && { flexDirection: 'row-reverse' }]}
+              onPress={() => {
+                if (isHidden) return;
+                const phone = order.customer_phone.replace(/\s+/g, '');
+                const url   = `tel:${phone}`;
+                Linking.canOpenURL(url)
+                  .then(supported => {
+                    if (!supported) { Alert.alert(ot.alertCallError); return; }
+                    // callTitle / callMsg are passed from the parent via ot
+                    Alert.alert(ot.alertCallTitle, ot.alertCallMsg(order.customer_phone), [
+                      { text: ot.alertCancelBtn },
+                      { text: ot.alertCallBtn, onPress: () => Linking.openURL(url) },
+                    ]);
+                  })
+                  .catch(() => Alert.alert(ot.alertCallFailed));
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="call-outline" size={15} color={DS.colors.accent} />
+              {isHidden
+                ? <PlaceholderDots length={15} />
+                : <Text style={[sc.detailText, { color: DS.colors.accent, fontWeight: '600' }, isRTL && { textAlign: 'right' }]}>
+                    {order.customer_phone}
+                  </Text>
+              }
+            </TouchableOpacity>
           )}
         </View>
 
-        <View style={localStyles.totalRow}>
-          <Text style={localStyles.totalLabel}>Total</Text>
-          <Text style={localStyles.totalValue}>{(Number(order?.final_price) || 0).toFixed(2)} MAD</Text>
-        </View>
+        <View style={sc.financeWrap}>
+  <View style={[sc.financeRow, isRTL && { flexDirection: 'row-reverse' }]}>
+    <View style={[sc.paymentChip, isRTL && { flexDirection: 'row-reverse' }]}>
+      <Ionicons
+        name={getPaymentIcon(order.payment_status) as any}
+        size={13}
+        color={getPaymentColor(order.payment_status)}
+      />
+      <Text style={[sc.paymentText, { color: getPaymentColor(order.payment_status) }]}>
+        {paymentLabel}
+      </Text>
+    </View>
+  </View>
+
+  {!isHidden ? (
+    <View style={sc.priceBox}>
+      <View style={[sc.priceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+        <Text style={[sc.priceLabel, isRTL && { textAlign: 'right' }]}>
+          {ot.itemsPriceLabel}
+        </Text>
+        <Text style={sc.priceValue}>
+          {((Number(order.final_price) || 0) - (Number(order.delivery_fee) || 0)).toFixed(2)} MAD
+        </Text>
       </View>
-
-      {/* Action Buttons */}
-      {showActions && (
-        <View style={localStyles.actionRow}>
-          <ActionButton
-            title="Location"
-            icon="map-outline"
-            onPress={() => onShowLocation(order)}
-            variant="secondary"
-          />
-
-          {order.status === 'OutForDelivery' && onMarkDelivered && (
-            <ActionButton
-              title="Delivered"
-              icon="checkmark-circle"
-              onPress={() => onMarkDelivered(order.id)}
-              variant="primary"
-              loading={updatingStatus === order.id}
-              disabled={updatingStatus === order.id}
-            />
-          )}
-
-          {tabType === 'available' && onAccept && (
-            <ActionButton
-              title="Accept"
-              icon="checkmark"
-              onPress={() => onAccept(order.id)}
-              variant="primary"
-            />
-          )}
-        </View>
-      )}
-
-      {/* Status Message for Accepted Orders */}
-      {tabType === 'accepted' && (order.status === 'Pending' || order.status === 'Preparing') && (
-        <View style={localStyles.statusMessage}>
-          <View style={localStyles.pulseDot} />
-          <Text style={localStyles.statusMessageText}>
-            {order.status === 'Preparing'
-              ? 'Restaurant is preparing your order...'
-              : 'Waiting for restaurant to prepare...'}
+      <View style={[sc.priceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+        <Text style={[sc.priceLabel, isRTL && { textAlign: 'right' }]}>
+          {ot.deliveryFeeLabel}
+        </Text>
+        <Text style={sc.priceValue}>
+          +{(Number(order.delivery_fee) || 0).toFixed(2)} MAD
+        </Text>
+      </View>
+      <View style={sc.priceDivider} />
+      <View style={[sc.priceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+        <Text style={[sc.totalLabel, isRTL && { textAlign: 'right' }]}>
+          {ot.totalLabel}
+        </Text>
+        <Text style={sc.totalValue}>
+          {(Number(order.final_price) || 0).toFixed(2)} MAD
+        </Text>
+      </View>
+    </View>
+  ) : tabType === 'availableOrders' ? (
+    // Show delivery fee even before the driver accepts (isHidden = true for unassigned orders)
+    <View style={sc.priceBox}>
+      <View style={[sc.priceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+        <Text style={[sc.priceLabel, isRTL && { textAlign: 'right' }]}>
+          {ot.deliveryFeeLabel}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="bicycle-outline" size={13} color={DS.colors.accent} />
+          <Text style={[sc.totalValue, { fontSize: 14 }]}>
+            {(Number(order.delivery_fee) || 0).toFixed(2)} MAD
           </Text>
         </View>
-      )}
+      </View>
+    </View>
+  ) : (
+    <View style={sc.totalChip}>
+      <PlaceholderDots length={8} />
+    </View>
+  )}
+</View>
+
+        {showActions && activeButtonCount > 0 && (
+          <View style={[sc.actionRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            {showRestaurantBtn && (
+              <ActionButton title={ot.restaurantBtn} icon="restaurant-outline" onPress={() => onShowRestaurantLocation!(order)} variant="secondary" />
+            )}
+            {showCustomerBtn && (
+              <ActionButton title={ot.customerBtn} icon="map-outline" onPress={() => onShowLocation(order)} variant="secondary" />
+            )}
+            {showPickUpBtn && (
+              <ActionButton title={ot.pickUp} icon="bag-handle-outline" onPress={() => onPickUp!(order.id)} variant="primary" loading={updatingStatus === order.id} disabled={updatingStatus === order.id} />
+            )}
+            {showDeliveredBtn && (
+              <ActionButton title={ot.delivered} icon="checkmark-circle" onPress={() => onMarkDelivered!(order.id)} variant="primary" loading={updatingStatus === order.id} disabled={updatingStatus === order.id} />
+            )}
+            {showAcceptBtn && (
+              <ActionButton title={ot.accept} icon="checkmark" onPress={() => onAccept!(order.id)} variant="primary" disabled={hasActiveOrders} />
+            )}
+          </View>
+        )}
+
+        {tabType === 'accepted' && order.delivery_status === 'assigned' && (
+          <View style={sc.statusMsg}>
+            <View style={sc.pulseDot} />
+            <Text style={[sc.statusMsgText, isRTL && { textAlign: 'right' }]}>
+              {order.order_status === 'ready_for_delivery' ? ot.msgReadyPickUp
+                : order.order_status === 'preparing'      ? ot.msgPreparing
+                : ot.msgWaiting}
+            </Text>
+          </View>
+        )}
+
+        {tabType === 'accepted' && order.delivery_status === 'pick_up' && (
+          <View style={[sc.statusMsg, { backgroundColor: DS.colors.blueDim, borderColor: DS.colors.blue + '33' }]}>
+            <View style={[sc.pulseDot, { backgroundColor: DS.colors.blue }]} />
+            <Text style={[sc.statusMsgText, { color: DS.colors.blue }, isRTL && { textAlign: 'right' }]}>{ot.msgPickedUp}</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 });
 
-// Premium Delivered Order Card
-const DeliveredOrderCard = React.memo(({ order }: { order: Order }) => (
-  <View style={localStyles.orderCard}>
-    <View style={localStyles.cardHeader}>
-      <View style={localStyles.orderInfo}>
-        <View style={localStyles.orderNumberRow}>
-          <Ionicons name="receipt-outline" size={16} color={Colors.primary} />
-          <Text style={localStyles.orderNumber}>{order.order_number}</Text>
+// ─────────────────────────────────────────────
+// DeliveredOrderCard
+// ─────────────────────────────────────────────
+const DeliveredOrderCard = React.memo(({
+  order, ot, isRTL,
+}: {
+  order: Order;
+  ot: ReturnType<typeof useLanguage>['t']['orders'];
+  isRTL: boolean;
+}) => (
+  <View style={[sc.card, DS.shadow]}>
+    <View style={[sc.cardAccentBar, { backgroundColor: DS.colors.accent }]} />
+    <View style={sc.cardBody}>
+      <View style={[sc.cardHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+        <View style={sc.cardHeaderLeft}>
+          <View style={[sc.orderNumRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            <Ionicons name="receipt-outline" size={13} color={DS.colors.accent} />
+            <Text style={sc.orderNum}>{order.order_number}</Text>
+          </View>
+          <Text style={[sc.customerName, isRTL && { textAlign: 'right' }]}>{order.customer_name || 'Customer'}</Text>
         </View>
-        <Text style={localStyles.customerName}>{order.customer_name || 'Customer'}</Text>
-      </View>
-      <View style={[localStyles.statusBadge, { backgroundColor: '#E8F5E9' }]}>
-        <Ionicons name="checkmark-circle-outline" size={14} color="#2E7D32" />
-        <Text style={[localStyles.statusText, { color: '#2E7D32' }]}>Delivered</Text>
-      </View>
-    </View>
-
-    {/* Order Items */}
-    {order.items && order.items.length > 0 && (
-      <View style={localStyles.itemsPreview}>
-        <View style={localStyles.itemsHeader}>
-          <Ionicons name="basket-outline" size={14} color={Colors.text.secondary} />
-          <Text style={localStyles.itemsCount}>{order.items.length} items</Text>
+        <View style={[sc.badge, { backgroundColor: DS.colors.accentDim, borderColor: DS.colors.accentBorder }]}>
+          <Ionicons name="checkmark-circle-outline" size={12} color={DS.colors.accent} />
+          <Text style={[sc.badgeText, { color: DS.colors.accent }]}>{ot.statusDelivered}</Text>
         </View>
-        <Text style={localStyles.itemsSummary} numberOfLines={2}>
-          {order.items.map(item => `${item.quantity}x ${item.product_name}`).join(' • ')}
-        </Text>
-      </View>
-    )}
-
-    {/* Delivery Info */}
-    <View style={localStyles.detailsGrid}>
-      <View style={localStyles.detailRow}>
-        <Ionicons name="location-outline" size={16} color={Colors.text.secondary} />
-        <Text style={localStyles.detailText} numberOfLines={2}>
-          {order.delivery_address || 'No address provided'}
-        </Text>
       </View>
 
-      {order.delivered_at && (
-        <View style={localStyles.detailRow}>
-          <Ionicons name="time-outline" size={16} color={Colors.text.secondary} />
-          <Text style={localStyles.detailText}>
-            Delivered {new Date(order.delivered_at).toLocaleDateString()}
-          </Text>
+      {((order.items && order.items.length > 0) || (order.deals && order.deals.length > 0)) && (
+        <View style={sc.itemsBox}>
+          <View style={[sc.itemsHeaderRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            <Ionicons name="basket-outline" size={13} color={DS.colors.gray2} />
+            <Text style={sc.itemsCount}>
+              {ot.items((order.items?.length ?? 0) + (order.deals?.length ?? 0))}
+            </Text>
+            {(order.order_type === 'deal' || order.order_type === 'both') && (
+              <View style={sc.dealTypeBadge}>
+                <Ionicons name="pricetag-outline" size={10} color={DS.colors.purple} />
+                <Text style={sc.dealTypeBadgeText}>
+                  {order.order_type === 'both' ? 'Deal + Items' : 'Deal'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Deals */}
+          {order.deals && order.deals.length > 0 && (
+            <View style={sc.dealsList}>
+              {order.deals.map((deal, idx) => (
+                <View key={`deal-${deal.deal_id}-${idx}`} style={[sc.dealRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                  <View style={sc.dealIconWrap}>
+                    <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
+                  </View>
+                  <View style={[sc.dealInfo, isRTL && { alignItems: 'flex-end' }]}>
+                    <Text style={[sc.dealName, isRTL && { textAlign: 'right' }]}>
+                      {deal.quantity}× Deal: {deal.deal_name}
+                    </Text>
+                    <View style={[sc.dealPriceRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                      {deal.real_price_deal !== deal.deal_price && (
+                        <Text style={sc.dealOriginalPrice}>
+                          {(Number(deal.real_price_deal) * deal.quantity).toFixed(2)} MAD
+                        </Text>
+                      )}
+                      <Text style={sc.dealFinalPrice}>
+                        {(Number(deal.deal_price) * deal.quantity).toFixed(2)} MAD
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {order.deals && order.deals.length > 0 && order.items && order.items.length > 0 && (
+            <View style={sc.itemsDealDivider} />
+          )}
+
+          {/* Regular items with optional sizes */}
+          {order.items && order.items.length > 0 && (
+            <View style={sc.regularItemsList}>
+              {order.items.map((item, idx) => (
+                <View key={`item-${idx}`} style={[sc.regularItemRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                  <Text style={[sc.regularItemName, isRTL && { textAlign: 'right' }]}>
+                    {item.quantity}× {item.product_name}
+                  </Text>
+                  {item.size_name && (
+                    <View style={sc.sizeBadge}>
+                      <Text style={sc.sizeBadgeText}>
+                        {item.size_name}
+                        {item.size_price ? ` (+${Number(item.size_price).toFixed(2)} MAD)` : ''}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={sc.regularItemPrice}>
+                    {(
+  ((Number(item.price) || 0) + (Number(item.size_price) || 0)) *
+  (Number(item.quantity) || 0)
+).toFixed(2)} MAD
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
-      <View style={localStyles.totalRow}>
-        <Text style={localStyles.totalLabel}>Delivery Fee</Text>
-        <Text style={localStyles.totalValue}>
-          {(Number(order.delivery_fee) || 0).toFixed(2)} MAD
-        </Text>
-      </View>
-    </View>
-
-    {/* Rating Section */}
-    {order.rating ? (
-      <View style={localStyles.ratingContainer}>
-        <View style={localStyles.ratingStars}>
-          {[1, 2, 3, 4, 5].map((star) => (
-            <Ionicons
-              key={star}
-              name={star <= order.rating!.rating ? 'star' : 'star-outline'}
-              size={16}
-              color="#F59E0B"
-            />
-          ))}
-          <Text style={localStyles.ratingValue}>{order.rating.rating}/5</Text>
+      <View style={sc.detailsGrid}>
+        <View style={[sc.detailRow, isRTL && { flexDirection: 'row-reverse' }]}>
+          <Ionicons name="location-outline" size={15} color={DS.colors.gray3} />
+          <Text style={[sc.detailText, isRTL && { textAlign: 'right' }]} numberOfLines={2}>
+            {order.delivery_address || ot.noAddress}
+          </Text>
         </View>
-        {order.rating.comment && (
-          <Text style={localStyles.ratingComment}>"{order.rating.comment}"</Text>
+        {order.delivered_at && (
+          <View style={[sc.detailRow, isRTL && { flexDirection: 'row-reverse' }]}>
+            <Ionicons name="time-outline" size={15} color={DS.colors.gray3} />
+            <Text style={sc.detailText}>
+              {ot.deliveredOn(new Date(order.delivered_at).toLocaleDateString())}
+            </Text>
+          </View>
         )}
       </View>
-    ) : (
-      <View style={localStyles.noRatingContainer}>
-        <Ionicons name="star-outline" size={16} color={Colors.gray[400]} />
-        <Text style={localStyles.noRatingText}>No rating yet</Text>
+
+      <View style={[sc.financeRow, isRTL && { flexDirection: 'row-reverse' }]}>
+        <Text style={sc.feeText}>{ot.deliveryFeeLabel}</Text>
+        <Text style={sc.totalText}>{(Number(order.delivery_fee) || 0).toFixed(2)} MAD</Text>
       </View>
-    )}
+
+      {order.rating ? (
+        <View style={sc.ratingBox}>
+          <View style={[sc.ratingStars, isRTL && { flexDirection: 'row-reverse' }]}>
+            {[1, 2, 3, 4, 5].map(star => (
+              <Ionicons key={star} name={star <= order.rating!.rating ? 'star' : 'star-outline'} size={15} color={DS.colors.amber} />
+            ))}
+            <Text style={sc.ratingVal}>{order.rating.rating}{ot.ratingOut}</Text>
+          </View>
+          {order.rating.comment && (
+            <Text style={[sc.ratingComment, isRTL && { textAlign: 'right' }]}>"{order.rating.comment}"</Text>
+          )}
+        </View>
+      ) : (
+        <View style={sc.noRatingBox}>
+          <Ionicons name="star-outline" size={15} color={DS.colors.gray3} />
+          <Text style={sc.noRatingText}>{ot.noRatingYet}</Text>
+        </View>
+      )}
+    </View>
   </View>
 ));
 
+// ─────────────────────────────────────────────
+// Section Header
+// ─────────────────────────────────────────────
+const SectionHeader = ({
+  title, count, dotColor, pulse, isRTL,
+}: {
+  title: string; count: number; dotColor: string; pulse?: boolean; isRTL: boolean;
+}) => (
+  <View style={[sc.sectionHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+    <View style={[sc.sectionTitleRow, isRTL && { flexDirection: 'row-reverse' }]}>
+      <View style={[sc.sectionDot, { backgroundColor: dotColor }]} />
+      <Text style={sc.sectionTitle}>{title}</Text>
+    </View>
+    <View style={[sc.sectionBadge, pulse && { backgroundColor: DS.colors.amberDim }]}>
+      {pulse && <View style={sc.pulseDot} />}
+      <Text style={[sc.sectionBadgeText, pulse && { color: DS.colors.amber }]}>{count}</Text>
+    </View>
+  </View>
+);
+
+// ─────────────────────────────────────────────
+// Main Screen
+// ─────────────────────────────────────────────
 const ActiveOrdersScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabType>('accepted');
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [assignedOrders, setAssignedOrders] = useState<Order[]>([]);
-  const [acceptedOrders, setAcceptedOrders] = useState<Order[]>([]);
-  const [deliveredOrders, setDeliveredOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [showMap, setShowMap] = useState(false);
-  const [mapUrl, setMapUrl] = useState<string>('');
-  const [updatingStatus, setUpdatingStatus] = useState<number | null>(null);
-  const [stats, setStats] = useState({
-    totalDeliveryFees: 0,
-    avgRating: 0,
-    avgDeliveryTime: 0,
-    totalDeliveries: 0,
-  });
-  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { t, isRTL } = useLanguage();
+  const ot = t.orders;
+  const ct = t.common;
 
-  // [ALL EXISTING BUSINESS LOGIC REMAINS EXACTLY THE SAME]
+  const [activeTab, setActiveTab]         = useState<TabType>('accepted');
+  const [orders, setOrders]               = useState<Order[]>([]);
+  const [assignedOrders, setAssignedOrders] = useState<Order[]>([]);
+  const [pickedUpOrders, setPickedUpOrders] = useState<Order[]>([]);
+  const [deliveredOrders, setDeliveredOrders] = useState<Order[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [showMap, setShowMap]             = useState(false);
+  const [mapUrl, setMapUrl]               = useState<string>('');
+  const [mapType, setMapType]             = useState<MapType>('delivery');
+  const [updatingStatus, setUpdatingStatus] = useState<number | null>(null);
+  const [stats, setStats]                 = useState({
+    totalDeliveryFees: 0,
+    avgRating:         0,
+    avgDeliveryTime:   0,
+    totalDeliveries:   0,
+  });
+
   const fetchOrders = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('deliveryManToken');
-      if (!token) {
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
+      if (!token) { setLoading(false); setRefreshing(false); return; }
 
       const [pendingResponse, assignedResponse, deliveredResponse] = await Promise.all([
-        fetch('https://ubua.cloud/api/delivery/orders/pending', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }),
-        fetch('https://ubua.cloud/api/delivery/my-orders', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }),
-        fetch('https://ubua.cloud/api/delivery/delivered-orders', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }),
+        fetch('https://ubua.cloud/api/delivery/orders/pending', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('https://ubua.cloud/api/delivery/my-orders',      { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('https://ubua.cloud/api/delivery/delivered-orders',{ headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
       if (pendingResponse.ok) {
         const pendingData = await pendingResponse.json();
-        const unassignedOrders = (pendingData.orders || []).filter(
-          (order: Order) => !order.delivery_man_id || order.delivery_man_id === null
-        );
-        console.log('Pending Response Status: zap', unassignedOrders);
-        setOrders(unassignedOrders);
+        const rawPending = (pendingData.orders || []).filter((o: Order) => !o.delivery_man_id || o.delivery_man_id === null);
+        // Normalise items to include size fields
+        setOrders(rawPending.map((o: Order) => ({
+          ...o,
+          items: (o.items || []).map((item: any) => ({
+            product_name: item.product_name,
+            quantity: item.quantity,
+            price: parseFloat(item.price ?? item.price_per_unit ?? 0),
+            image: item.image,
+            size_id: item.size_id ?? null,
+            size_name: item.size_name ?? null,
+            size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+          })),
+          deals: (o.deals || []).map((d: any) => ({
+            deal_id: d.deal_id,
+            deal_name: d.deal_name,
+            quantity: d.quantity,
+            deal_price: parseFloat(d.deal_price ?? 0),
+            real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+          })),
+        })));
       } else if (pendingResponse.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await AsyncStorage.removeItem('deliveryManToken');
-        return;
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
+        await AsyncStorage.removeItem('deliveryManToken'); return;
       }
 
       if (assignedResponse.ok) {
         const assignedData = await assignedResponse.json();
-        const allAssigned = assignedData.orders || [];
-        const validAssigned = allAssigned.filter(
-          (order: Order) => order.delivery_man_id !== null && order.delivery_man_id !== undefined
-        );
-        const outForDelivery = validAssigned.filter(
-          (order: Order) => order.status === 'OutForDelivery'
-        );
-        setAssignedOrders(outForDelivery);
+        const allAssigned  = assignedData.orders || [];
+        const validAssigned = allAssigned
+          .filter((o: Order) => o.delivery_man_id != null)
+          .map((o: Order) => ({
+            ...o,
+            items: (o.items || []).map((item: any) => ({
+              product_name: item.product_name,
+              quantity: item.quantity,
+              price: parseFloat(item.price ?? item.price_per_unit ?? 0),
+              image: item.image,
+              size_id: item.size_id ?? null,
+              size_name: item.size_name ?? null,
+              size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+            })),
+            deals: (o.deals || []).map((d: any) => ({
+              deal_id: d.deal_id,
+              deal_name: d.deal_name,
+              quantity: d.quantity,
+              deal_price: parseFloat(d.deal_price ?? 0),
+              real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+            })),
+          }));
+        const isCancelled = (o: Order) =>
+        o.order_status === 'cancelled' || o.delivery_status === 'cancelled';
 
-        const accepted = validAssigned.filter(
-          (order: Order) => order.status === 'Pending' || order.status === 'Preparing'
-        );
-        setAcceptedOrders(accepted);
+        setAssignedOrders(validAssigned.filter((o: Order) =>
+          o.delivery_status === 'assigned' &&
+          o.order_status !== 'delivered' &&
+          !isCancelled(o)
+        ));
+        setPickedUpOrders(validAssigned.filter((o: Order) =>
+          o.delivery_status === 'pick_up' &&
+          o.order_status !== 'delivered' &&
+          !isCancelled(o)
+        ));
       } else if (assignedResponse.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await AsyncStorage.removeItem('deliveryManToken');
-        return;
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
+        await AsyncStorage.removeItem('deliveryManToken'); return;
       }
 
       if (deliveredResponse.ok) {
         const deliveredData = await deliveredResponse.json();
-        setDeliveredOrders(deliveredData.orders || []);
+        setDeliveredOrders((deliveredData.orders || []).map((o: Order) => ({
+          ...o,
+          items: (o.items || []).map((item: any) => ({
+            product_name: item.product_name,
+            quantity: item.quantity,
+            price: parseFloat(item.price ?? item.price_per_unit ?? 0),
+            image: item.image,
+            size_id: item.size_id ?? null,
+            size_name: item.size_name ?? null,
+            size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+          })),
+          deals: (o.deals || []).map((d: any) => ({
+            deal_id: d.deal_id,
+            deal_name: d.deal_name,
+            quantity: d.quantity,
+            deal_price: parseFloat(d.deal_price ?? 0),
+            real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+          })),
+        })));
       } else if (deliveredResponse.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await AsyncStorage.removeItem('deliveryManToken');
-        return;
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
+        await AsyncStorage.removeItem('deliveryManToken'); return;
       }
 
       try {
-        const statsResponse = await fetch('https://ubua.cloud/api/delivery/stats', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        console.log('Stats Response Status:', statsResponse.status);
-        console.log('Stats Response OK:', statsResponse.ok);
-
+        const statsResponse = await fetch('https://ubua.cloud/api/delivery/stats', { headers: { Authorization: `Bearer ${token}` } });
         if (statsResponse.ok) {
-          const statsText = await statsResponse.text();
-          console.log('Stats Raw Response Text:', statsText);
-
-          try {
-            const statsData = JSON.parse(statsText);
-            console.log('Parsed Stats Data:', JSON.stringify(statsData, null, 2));
-            console.log('Stats Data Keys:', Object.keys(statsData));
-
-            console.log('total_delivery_fees from API:', statsData.total_delivery_fees);
-            console.log('avg_rating from API:', statsData.avg_rating);
-            console.log('avg_delivery_time from API:', statsData.avg_delivery_time);
-            console.log('total_deliveries from API:', statsData.total_deliveries);
-
-            setStats({
-              totalDeliveryFees: statsData.total_delivery_fees || 0,
-              avgRating: statsData.avg_rating || 0,
-              avgDeliveryTime: statsData.avg_delivery_time || 0,
-              totalDeliveries: statsData.total_deliveries || 0,
-            });
-
-            console.log('Stats state after setting:', {
-              totalDeliveryFees: statsData.total_delivery_fees || 0,
-              avgRating: statsData.avg_rating || 0,
-              avgDeliveryTime: statsData.avg_delivery_time || 0,
-              totalDeliveries: statsData.total_deliveries || 0,
-            });
-          } catch (parseError) {
-            console.error('Error parsing stats JSON:', parseError);
-            console.error('Response text that failed to parse:', statsText);
-          }
-        } else {
-          console.warn('Stats fetch failed with status:', statsResponse.status);
-          const errorText = await statsResponse.text();
-          console.warn('Stats error response:', errorText);
+          const statsData = await statsResponse.json();
+          setStats({
+            totalDeliveryFees: statsData.total_delivery_fees || 0,
+            avgRating:         statsData.avg_rating          || 0,
+            avgDeliveryTime:   statsData.avg_delivery_time   || 0,
+            totalDeliveries:   statsData.total_deliveries    || 0,
+          });
         }
       } catch (statsError) {
-        console.error('Network error fetching stats:', statsError);
+        console.error('Error fetching stats:', statsError);
       }
-
     } catch (error) {
       console.error('Error fetching orders:', error);
-      if (!refreshing) {
-        Alert.alert('Error', 'Failed to fetch orders. Please check your connection and try again.');
-      }
+      if (!refreshing) Alert.alert(ct.error, ot.alertFetchError);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [refreshing]);
 
-  const updateLocation = useCallback(async () => {
-    try {
-      const token = await AsyncStorage.getItem('deliveryManToken');
-      if (!token) return;
+const updateLocation = useCallback(async () => {
+  try {
+    const token = await AsyncStorage.getItem('deliveryManToken');
+    if (!token) return;
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission not granted');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      await fetch('https://ubua.cloud/api/delivery/update-location', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          lat: location.coords.latitude,
-          lon: location.coords.longitude,
-        }),
-      });
-    } catch (error) {
-      console.error('Error updating location:', error);
+    // 1) Check device location services
+    const servicesEnabled = await Location.hasServicesEnabledAsync();
+    if (!servicesEnabled) {
+      console.log('Location services are disabled on this device');
+      return;
     }
-  }, []);
+
+    // 2) Ask foreground permission
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      console.log('Location permission not granted');
+      return;
+    }
+
+    // 3) Try last known location first
+    let location = await Location.getLastKnownPositionAsync();
+
+    // 4) Fallback to a fresh GPS read
+    if (!location) {
+      location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+    }
+
+    if (!location?.coords) {
+      console.log('Could not get location coords');
+      return;
+    }
+
+    await fetch('https://ubua.cloud/api/delivery/update-location', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      }),
+    });
+
+    console.log(
+      'Location updated:',
+      location.coords.latitude,
+      location.coords.longitude
+    );
+  } catch (error: any) {
+    console.error('Error updating location:', error?.message || error);
+  }
+}, []);
 
   useEffect(() => {
     fetchOrders();
-
-    const locationInterval = setInterval(() => {
-      updateLocation();
-    }, 10000);
-
+    const locationInterval = setInterval(updateLocation, 30000);
     updateLocation();
-
-    return () => {
-      clearInterval(locationInterval);
-    };
+    return () => clearInterval(locationInterval);
   }, [fetchOrders, updateLocation]);
 
   useEffect(() => {
     const unsubscribe = realtimeService.subscribe('orders', fetchOrders, 3000);
-
-    return () => {
-      unsubscribe();
-    };
+    return unsubscribe;
   }, [fetchOrders]);
 
   const onRefresh = useCallback(() => {
@@ -624,90 +959,86 @@ const ActiveOrdersScreen: React.FC = () => {
     fetchOrders();
   }, [fetchOrders]);
 
-  const handleShowLocation = async (order: Order) => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-      if (!order.delivery_address || order.delivery_address.trim() === '') {
-        Alert.alert('No Address', 'Delivery address is not available for this order');
-        return;
-      }
-
-      let currentLat: number | null = null;
-      let currentLng: number | null = null;
-
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          currentLat = location.coords.latitude;
-          currentLng = location.coords.longitude;
-        }
-      } catch (locError) {
-        console.log('Could not get current location:', locError);
-      }
-
-      const address = encodeURIComponent(order.delivery_address.trim());
-
-      let mapsUrl: string;
-      if (currentLat && currentLng && order.lat && order.lon) {
-        mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${order.lat},${order.lon}&travelmode=driving`;
-      } else if (order.lat && order.lon) {
-        mapsUrl = `https://www.google.com/maps/search/?api=1&query=${order.lat},${order.lon}`;
-      } else {
-        mapsUrl = `https://www.google.com/maps/search/?api=1&query=${address}`;
-      }
-
-      setSelectedOrder(order);
-      setMapUrl(mapsUrl);
-      setShowMap(true);
-    } catch (error) {
-      console.error('Error showing location:', error);
-      Alert.alert('Error', 'Failed to show location');
-    }
-  };
-
   const acceptOrder = async (orderId: number) => {
+     if (assignedOrders.length > 0 || pickedUpOrders.length > 0) {
+      Alert.alert(ot.alertActiveOrderTitle, ot.alertActiveOrderMsg);
+      return;
+    }
+    const orderToAccept = orders.find(o => o.id === orderId);
+    if (!orderToAccept) return;
+
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    setAssignedOrders(prev => [...prev, { ...orderToAccept, delivery_man_id: 1, delivery_status: 'assigned' }]);
+
     try {
       const token = await AsyncStorage.getItem('deliveryManToken');
       if (!token) {
-        Alert.alert('Error', 'Authentication required');
+        Alert.alert(ct.error, ct.authRequired);
+        setOrders(prev => [...prev, orderToAccept]);
+        setAssignedOrders(prev => prev.filter(o => o.id !== orderId));
         return;
       }
-
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       const response = await fetch('https://ubua.cloud/api/delivery/accept-order', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ order_id: orderId }),
       });
 
       if (response.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert(
-          'Order Assigned',
-          'Order has been assigned to you. Wait for the restaurant to prepare it. You will be notified when it\'s ready for delivery.',
-          [{
-            text: 'OK', onPress: () => {
-              fetchOrders();
-              setActiveTab('accepted');
-            }
-          }]
-        );
+        Alert.alert(ot.alertOrderAssigned, ot.alertOrderAssignedMsg, [{ text: ct.ok }]);
+        setActiveTab('accepted');
+        fetchOrders();
       } else if (response.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
         await AsyncStorage.removeItem('deliveryManToken');
+        setOrders(prev => [...prev, orderToAccept]);
+        setAssignedOrders(prev => prev.filter(o => o.id !== orderId));
       } else {
-        const data = await response.json().catch(() => ({ message: 'Failed to accept order' }));
-        Alert.alert('Error', data.message || 'Failed to accept order');
+        const data = await response.json().catch(() => ({ message: ot.alertOrderAcceptError }));
+        Alert.alert(ct.error, data.message || ot.alertOrderAcceptError);
+        setOrders(prev => [...prev, orderToAccept]);
+        setAssignedOrders(prev => prev.filter(o => o.id !== orderId));
       }
     } catch (error) {
       console.error('Error accepting order:', error);
-      Alert.alert('Error', 'Network error. Please check your connection and try again.');
+      Alert.alert(ct.error, ct.networkError);
+      setOrders(prev => [...prev, orderToAccept]);
+      setAssignedOrders(prev => prev.filter(o => o.id !== orderId));
+    }
+  };
+
+  const markAsPickedUp = async (orderId: number) => {
+    try {
+      setUpdatingStatus(orderId);
+      const token = await AsyncStorage.getItem('deliveryManToken');
+      if (!token) { Alert.alert(ct.error, ct.authRequired); setUpdatingStatus(null); return; }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const response = await fetch('https://ubua.cloud/api/delivery/update-order-status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ order_id: orderId, status: 'pick_up' }),
+      });
+
+      if (response.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(ct.success, ot.alertPickUpSuccess, [{ text: ct.ok, onPress: fetchOrders }]);
+      } else if (response.status === 401) {
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
+        await AsyncStorage.removeItem('deliveryManToken');
+      } else {
+        const data = await response.json().catch(() => ({ message: ot.alertUpdateError }));
+        Alert.alert(ct.error, data.message || ot.alertUpdateError);
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      Alert.alert(ct.error, ct.networkError);
+    } finally {
+      setUpdatingStatus(null);
     }
   };
 
@@ -715,353 +1046,327 @@ const ActiveOrdersScreen: React.FC = () => {
     try {
       setUpdatingStatus(orderId);
       const token = await AsyncStorage.getItem('deliveryManToken');
-      if (!token) {
-        Alert.alert('Error', 'Authentication required');
-        setUpdatingStatus(null);
-        return;
-      }
+      if (!token) { Alert.alert(ct.error, ct.authRequired); setUpdatingStatus(null); return; }
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       const response = await fetch('https://ubua.cloud/api/delivery/update-order-status', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ order_id: orderId, status: 'Delivered' }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ order_id: orderId, status: 'delivered' }),
       });
 
       if (response.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert('Success', 'Order marked as delivered!', [
-          { text: 'OK', onPress: () => fetchOrders() }
-        ]);
+        Alert.alert(ct.success, ot.alertDeliveredSuccess, [{ text: ct.ok, onPress: fetchOrders }]);
       } else if (response.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
+        Alert.alert(ct.sessionExpired, ct.sessionExpiredMsg);
         await AsyncStorage.removeItem('deliveryManToken');
       } else {
-        const data = await response.json().catch(() => ({ message: 'Failed to update order status' }));
-        Alert.alert('Error', data.message || 'Failed to update order status');
+        const data = await response.json().catch(() => ({ message: ot.alertUpdateError }));
+        Alert.alert(ct.error, data.message || ot.alertUpdateError);
       }
     } catch (error) {
       console.error('Error updating order status:', error);
-      Alert.alert('Error', 'Network error. Please check your connection and try again.');
+      Alert.alert(ct.error, ct.networkError);
     } finally {
       setUpdatingStatus(null);
     }
   };
 
+  const handleShowRestaurantLocation = async (order: Order) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (!order.restaurant_lat || !order.restaurant_lon) {
+        Alert.alert(ot.alertNoRestaurant); return;
+      }
+      setSelectedOrder(order); setMapType('restaurant');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setMapUrl(`https://www.google.com/maps/search/?api=1&query=${order.restaurant_lat},${order.restaurant_lon}`);
+        setShowMap(true); return;
+      }
+      const location = await Location.getCurrentPositionAsync({});
+      setMapUrl(`https://www.google.com/maps/dir/?api=1&origin=${location.coords.latitude},${location.coords.longitude}&destination=${order.restaurant_lat},${order.restaurant_lon}&travelmode=driving`);
+      setShowMap(true);
+    } catch (error) {
+      console.error('Error showing restaurant location:', error);
+      Alert.alert(ct.error, ot.alertNoRestaurant);
+    }
+  };
+
+  const handleShowLocation = async (order: Order) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (!order.delivery_address || order.delivery_address.trim() === '') {
+        Alert.alert(ot.alertNoLocation, ot.alertNoLocationMsg); return;
+      }
+      setSelectedOrder(order); setMapType('delivery');
+      const address    = encodeURIComponent(order.delivery_address.trim());
+      const initialUrl = `https://www.google.com/maps/search/?api=1&query=${address}`;
+      setMapUrl(initialUrl); setShowMap(true);
+
+      (async () => {
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const location = await Location.getCurrentPositionAsync({});
+            const currentLat = location.coords.latitude;
+            const currentLng = location.coords.longitude;
+            setMapUrl(order.lat && order.lon
+              ? `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${order.lat},${order.lon}&travelmode=driving`
+              : `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${address}&travelmode=driving`
+            );
+          }
+        } catch (locError) {
+          console.log('Could not get current location for directions:', locError);
+        }
+      })();
+    } catch (error) {
+      console.error('Error showing location:', error);
+      Alert.alert(ct.error, 'Failed to show location');
+    }
+  };
+
   const renderSkeleton = () => (
-    <ScrollView
-      style={localStyles.scrollView}
-      contentContainerStyle={localStyles.scrollContent}
-      showsVerticalScrollIndicator={false}>
-      <View style={localStyles.section}>
-        {[1, 2, 3].map((item) => (
-          <OrderCardSkeleton key={item} />
-        ))}
-      </View>
+    <ScrollView style={styles.scroll} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]} showsVerticalScrollIndicator={false}>
+      <View style={styles.section}>{[1, 2, 3].map(item => <OrderCardSkeleton key={item} />)}</View>
     </ScrollView>
   );
 
-  if (loading && orders.length === 0 && acceptedOrders.length === 0 && assignedOrders.length === 0) {
+  if (loading && orders.length === 0 && assignedOrders.length === 0 && pickedUpOrders.length === 0) {
     return (
-      <View style={[localStyles.container, { paddingTop: insets.top }]}>
-        <LinearGradient
-          colors={[Colors.dark, Colors.darkLight]}
-          style={localStyles.header}>
-          <View style={localStyles.headerContent}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <LinearGradient colors={[DS.colors.headerTop, DS.colors.headerBot]} style={styles.topBar}>
+          <View style={[styles.topBarRow, isRTL && { flexDirection: 'row-reverse' }]}>
             <View>
-              <Text style={localStyles.headerTitle}>Orders</Text>
-              <Text style={localStyles.headerSubtitle}>Manage your deliveries</Text>
+              <Text style={[styles.topBarEyebrow, isRTL && { textAlign: 'right' }]}>{t.common.eyebrow}</Text>
+              <Text style={[styles.topBarTitle, isRTL && { textAlign: 'right' }]}>{ot.screenTitle}</Text>
             </View>
-            <View style={localStyles.headerIcon}>
-              <Ionicons name="bicycle" size={28} color="#fff" />
+            <View style={styles.topBarIconWrap}>
+              <Ionicons name="bicycle" size={22} color={DS.colors.accent} />
             </View>
           </View>
+          <View style={styles.topBarAccentLine} />
         </LinearGradient>
         {renderSkeleton()}
       </View>
     );
   }
 
+  const tabs: { key: TabType; icon: string; label: string; count: number }[] = [
+    { key: 'accepted',       icon: 'bicycle',        label: ot.tabActive,    count: assignedOrders.length + pickedUpOrders.length },
+    { key: 'availableOrders',icon: 'checkmark-circle',label: ot.tabAvailable, count: orders.length },
+    { key: 'delivered',      icon: 'checkmark-done', label: ot.tabDone,      count: deliveredOrders.length },
+  ];
+
   return (
-    <View style={[localStyles.container, { paddingTop: insets.top }]}>
-      <LinearGradient
-        colors={[Colors.dark, Colors.darkLight]}
-        style={localStyles.header}>
-        <View style={localStyles.headerContent}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: 70 }]}>
+      <LinearGradient colors={[DS.colors.headerTop, DS.colors.headerBot]} style={styles.topBar}>
+        {[0.33, 0.66].map(p => (
+          <View key={p} style={[StyleSheet.absoluteFillObject, { borderLeftWidth: 1, borderLeftColor: '#39E97B05', left: `${p * 100}%` as any }]} pointerEvents="none" />
+        ))}
+        <View style={[styles.topBarRow, isRTL && { flexDirection: 'row-reverse' }]}>
           <View>
-            <Text style={localStyles.headerTitle}>Orders</Text>
-            <Text style={localStyles.headerSubtitle}>Manage your deliveries</Text>
+            <Text style={[styles.topBarEyebrow, isRTL && { textAlign: 'right' }]}>{t.common.eyebrow}</Text>
+            <Text style={[styles.topBarTitle, isRTL && { textAlign: 'right' }]}>{ot.screenTitle}</Text>
           </View>
-          <View style={localStyles.headerStats}>
-            <View style={localStyles.headerStat}>
-              <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-              <Text style={localStyles.headerStatText}>{acceptedOrders.length + assignedOrders.length} active</Text>
+          <View style={[styles.topBarMeta, isRTL && { flexDirection: 'row-reverse' }]}>
+            <View style={styles.topBarChip}>
+              <Ionicons name="checkmark-circle" size={13} color={DS.colors.accent} />
+              <Text style={styles.topBarChipText}>{ot.activeChip(assignedOrders.length + pickedUpOrders.length)}</Text>
             </View>
-            <View style={localStyles.headerStatDivider} />
-            <View style={localStyles.headerStat}>
-              <Ionicons name="checkmark-done" size={16} color="#fff" />
-              <Text style={localStyles.headerStatText}>{deliveredOrders.length} completed</Text>
+            <View style={[styles.topBarChip, { marginLeft: DS.sp.sm }]}>
+              <Ionicons name="checkmark-done" size={13} color={DS.colors.gray2} />
+              <Text style={[styles.topBarChipText, { color: DS.colors.gray2 }]}>{ot.doneChip(deliveredOrders.length)}</Text>
             </View>
           </View>
         </View>
+        <View style={styles.topBarAccentLine} />
       </LinearGradient>
 
-      {/* Stats Grid */}
-      <View style={localStyles.statsGrid}>
-        <StatCard
-          icon="cash-outline"
-          value={`${stats.totalDeliveryFees.toFixed(2)} MAD`}
-          label="Total Fees"
-          color="#10B981"
-        />
-        <StatCard
-          icon="star-outline"
-          value={stats.avgRating > 0 ? stats.avgRating.toFixed(1) : 'N/A'}
-          label="Avg Rating"
-          color="#F59E0B"
-        />
-        <StatCard
-          icon="time-outline"
-          value={stats.avgDeliveryTime > 0 ? `${Math.round(stats.avgDeliveryTime)}m` : 'N/A'}
-          label="Avg Time"
-          color="#3B82F6"
-        />
+      <View style={styles.statsStrip}>
+        <StatCard icon="cash-outline"  value={`${stats.totalDeliveryFees.toFixed(2)} MAD`} label={ot.statTotalFees} color={DS.colors.accent} />
+        <StatCard icon="star-outline"  value={stats.avgRating > 0 ? stats.avgRating.toFixed(1) : 'N/A'} label={ot.statAvgRating} color={DS.colors.amber} />
+        <StatCard icon="time-outline"  value={stats.avgDeliveryTime > 0 ? `${Math.round(stats.avgDeliveryTime)}m` : 'N/A'} label={ot.statAvgTime} color={DS.colors.blue} />
       </View>
 
-      {/* Segmented Control */}
-      <View style={localStyles.segmentedControl}>
-        <TouchableOpacity
-          style={[localStyles.segment, activeTab === 'accepted' && localStyles.segmentActive]}
-          onPress={() => {
-            setActiveTab('accepted');
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }}
-          activeOpacity={0.7}>
-          <Ionicons
-            name="bicycle"
-            size={18}
-            color={activeTab === 'accepted' ? Colors.primary : Colors.text.secondary}
-          />
-          <Text style={[localStyles.segmentText, activeTab === 'accepted' && localStyles.segmentTextActive]}>
-            Active ({acceptedOrders.length + assignedOrders.length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[localStyles.segment, activeTab === 'delivered' && localStyles.segmentActive]}
-          onPress={() => {
-            setActiveTab('delivered');
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }}
-          activeOpacity={0.7}>
-          <Ionicons
-            name="checkmark-done"
-            size={18}
-            color={activeTab === 'delivered' ? Colors.primary : Colors.text.secondary}
-          />
-          <Text style={[localStyles.segmentText, activeTab === 'delivered' && localStyles.segmentTextActive]}>
-            Delivered ({deliveredOrders.length})
-          </Text>
-        </TouchableOpacity>
+      <View style={[styles.tabBar, isRTL && { flexDirection: 'row-reverse' }]}>
+        {tabs.map(tab => {
+          const active = activeTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tab, active && styles.tabActive]}
+              onPress={() => { setActiveTab(tab.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={tab.icon as any} size={16} color={active ? DS.colors.accent : DS.colors.gray3} />
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
+              {tab.count > 0 && (
+                <View style={[styles.tabBadge, active && styles.tabBadgeActive]}>
+                  <Text style={[styles.tabBadgeText, active && styles.tabBadgeTextActive]}>{tab.count}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <ScrollView
-        style={localStyles.scrollView}
-        contentContainerStyle={localStyles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.primary}
-            colors={[Colors.primary]}
-          />
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={DS.colors.accent} colors={[DS.colors.accent]} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading ? renderSkeleton()
+          : activeTab === 'delivered' ? (
+            deliveredOrders.length > 0
+              ? (<View style={styles.section}>{deliveredOrders.map(order => <DeliveredOrderCard key={order.id} order={order} ot={ot} isRTL={isRTL} />)}</View>)
+              : (<View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}><Ionicons name="checkmark-done" size={36} color={DS.colors.gray3} /></View>
+                  <Text style={styles.emptyTitle}>{ot.emptyDone}</Text>
+                  <Text style={styles.emptySub}>{ot.emptyDoneSub}</Text>
+                </View>)
+          ) : activeTab === 'availableOrders' ? (
+            orders.length > 0
+              ? (<View style={styles.section}>
+                  <SectionHeader title={ot.sectionAvailable} count={orders.length} dotColor={DS.colors.accent} isRTL={isRTL} />
+                  {orders.map(order => (
+                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
+                    onShowRestaurantLocation={handleShowRestaurantLocation} onAccept={acceptOrder}
+                    updatingStatus={updatingStatus} tabType="availableOrders" ot={ot} isRTL={isRTL}
+                    hasActiveOrders={assignedOrders.length > 0 || pickedUpOrders.length > 0} />
+                  ))}
+                </View>)
+              : (<View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}><Ionicons name="checkmark-circle" size={36} color={DS.colors.gray3} /></View>
+                  <Text style={styles.emptyTitle}>{ot.emptyAvailable}</Text>
+                  <Text style={styles.emptySub}>{ot.emptyAvailableSub}</Text>
+                </View>)
+          ) : (
+            <>
+              {pickedUpOrders.length > 0 && (
+                <View style={styles.section}>
+                  <SectionHeader title={ot.sectionOnTheWay} count={pickedUpOrders.length} dotColor={DS.colors.blue} isRTL={isRTL} />
+                  {pickedUpOrders.map(order => (
+                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
+                      onShowRestaurantLocation={handleShowRestaurantLocation} onMarkDelivered={markAsDelivered}
+                      updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
+                  ))}
+                </View>
+              )}
+              {assignedOrders.length > 0 && (
+                <View style={styles.section}>
+                  <SectionHeader title={ot.sectionAssigned} count={assignedOrders.length} dotColor={DS.colors.orange} pulse isRTL={isRTL} />
+                  {assignedOrders.map(order => (
+                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
+                      onShowRestaurantLocation={handleShowRestaurantLocation} onPickUp={markAsPickedUp}
+                      updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
+                  ))}
+                </View>
+              )}
+              {assignedOrders.length === 0 && pickedUpOrders.length === 0 && (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}><Ionicons name="bicycle" size={36} color={DS.colors.gray3} /></View>
+                  <Text style={styles.emptyTitle}>{ot.emptyActive}</Text>
+                  <Text style={styles.emptySub}>{ot.emptyActiveSub}</Text>
+                </View>
+              )}
+            </>
+          )
         }
-        showsVerticalScrollIndicator={false}>
-
-        {loading ? (
-          renderSkeleton()
-        ) : activeTab === 'delivered' ? (
-          <>
-            {deliveredOrders.length > 0 ? (
-              <View style={localStyles.section}>
-                {deliveredOrders.map((order: Order) => (
-                  <DeliveredOrderCard key={order.id} order={order} />
-                ))}
-              </View>
-            ) : (
-              <View style={localStyles.emptyState}>
-                <View style={localStyles.emptyStateIcon}>
-                  <Ionicons name="checkmark-done" size={48} color={Colors.gray[400]} />
-                </View>
-                <Text style={localStyles.emptyStateTitle}>No delivered orders</Text>
-                <Text style={localStyles.emptyStateSubtitle}>
-                  Completed deliveries will appear here
-                </Text>
-              </View>
-            )}
-          </>
-        ) : (
-          <>
-            {/* Ready for Delivery Section */}
-            {assignedOrders.length > 0 && (
-              <View style={localStyles.section}>
-                <View style={localStyles.sectionHeader}>
-                  <View style={localStyles.sectionTitleContainer}>
-                    <View style={[localStyles.sectionDot, { backgroundColor: '#2196F3' }]} />
-                    <Text style={localStyles.sectionTitle}>Ready for Delivery</Text>
-                  </View>
-                  <View style={localStyles.sectionBadge}>
-                    <Text style={localStyles.sectionBadgeText}>{assignedOrders.length}</Text>
-                  </View>
-                </View>
-                {assignedOrders.map((order: Order) => (
-                  <OrderCard
-                    key={order.id}
-                    order={order}
-                    showActions={true}
-                    onShowLocation={handleShowLocation}
-                    onMarkDelivered={markAsDelivered}
-                    updatingStatus={updatingStatus}
-                    tabType={activeTab}
-                  />
-                ))}
-              </View>
-            )}
-
-            {/* Waiting Section */}
-            {acceptedOrders.length > 0 && (
-              <View style={localStyles.section}>
-                <View style={localStyles.sectionHeader}>
-                  <View style={localStyles.sectionTitleContainer}>
-                    <View style={[localStyles.sectionDot, { backgroundColor: '#F97316' }]} />
-                    <Text style={localStyles.sectionTitle}>Waiting for Restaurant</Text>
-                  </View>
-                  <View style={[localStyles.sectionBadge, localStyles.pulseBadge]}>
-                    <View style={localStyles.pulseDot} />
-                    <Text style={localStyles.sectionBadgeText}>{acceptedOrders.length}</Text>
-                  </View>
-                </View>
-                {acceptedOrders.map((order: Order) => (
-                  <OrderCard
-                    key={order.id}
-                    order={order}
-                    showActions={false}
-                    onShowLocation={handleShowLocation}
-                    tabType={activeTab}
-                  />
-                ))}
-              </View>
-            )}
-
-            {acceptedOrders.length === 0 && assignedOrders.length === 0 && (
-              <View style={localStyles.emptyState}>
-                <View style={localStyles.emptyStateIcon}>
-                  <Ionicons name="bicycle" size={48} color={Colors.gray[400]} />
-                </View>
-                <Text style={localStyles.emptyStateTitle}>No active orders</Text>
-                <Text style={localStyles.emptyStateSubtitle}>
-                  Orders assigned to you will appear here
-                </Text>
-              </View>
-            )}
-          </>
-        )}
       </ScrollView>
 
-      {/* Map Modal */}
-      <Modal
-        visible={showMap}
-        animationType="slide"
-        onRequestClose={() => setShowMap(false)}>
-        <View style={localStyles.mapContainer}>
-          <View style={localStyles.mapHeader}>
-            <TouchableOpacity
-              onPress={() => {
-                setShowMap(false);
-                setSelectedOrder(null);
-              }}
-              style={localStyles.mapCloseButton}>
-              <Ionicons name="close" size={24} color="#fff" />
+      <Modal visible={showMap} animationType="slide" onRequestClose={() => setShowMap(false)}>
+        <View style={styles.mapContainer}>
+          <View style={styles.mapHeader}>
+            <TouchableOpacity onPress={() => { setShowMap(false); setSelectedOrder(null); }} style={styles.mapCloseBtn}>
+              <Ionicons name="close" size={22} color={DS.colors.white} />
             </TouchableOpacity>
-            <Text style={localStyles.mapHeaderTitle}>Delivery Location</Text>
+            <Text style={styles.mapHeaderTitle}>
+              {mapType === 'delivery' ? ot.mapDeliveryTitle : ot.mapRestaurantTitle}
+            </Text>
             <View style={{ width: 40 }} />
           </View>
 
           <WebView
             source={{ uri: mapUrl }}
-            style={localStyles.mapWebView}
-            startInLoadingState={true}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            allowsInlineMediaPlayback={true}
+            style={styles.mapWebView}
+            startInLoadingState
+            javaScriptEnabled
+            domStorageEnabled
+            allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
             userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
             renderLoading={() => (
-              <View style={localStyles.mapLoadingContainer}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={localStyles.mapLoadingText}>Loading map...</Text>
+              <View style={styles.mapLoadingWrap}>
+                <ActivityIndicator size="large" color={DS.colors.accent} />
+                <Text style={styles.mapLoadingText}>{ct.loadingMap}</Text>
               </View>
             )}
-            onError={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('WebView error: ', nativeEvent);
-            }}
-            onHttpError={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('WebView HTTP error: ', nativeEvent);
-            }}
-            onLoadEnd={() => {
-              console.log('Map loaded successfully');
-            }}
-            onShouldStartLoadWithRequest={(request) => {
-              if (request.url.startsWith('intent://') || request.url.startsWith('geo:')) {
-                return false;
-              }
+            onError={e => console.error('WebView error:', e.nativeEvent)}
+            onHttpError={e => console.error('WebView HTTP error:', e.nativeEvent)}
+            onLoadEnd={() => console.log('Map loaded successfully')}
+            onShouldStartLoadWithRequest={request => {
+              if (request.url.startsWith('intent://') || request.url.startsWith('geo:')) return false;
               return true;
             }}
           />
 
           {selectedOrder && (
-            <View style={localStyles.mapInfo}>
-              <View style={localStyles.mapInfoHeader}>
-                <View style={localStyles.mapInfoIcon}>
-                  <Ionicons name="location" size={24} color="#FF3B30" />
+            <View style={styles.mapInfo}>
+              <View style={[styles.mapInfoHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+                <View style={styles.mapInfoIcon}>
+                  <Ionicons name={mapType === 'delivery' ? 'location' : 'restaurant'} size={22} color={DS.colors.danger} />
                 </View>
-                <View style={localStyles.mapInfoContent}>
-                  <Text style={localStyles.mapInfoAddress}>{selectedOrder.delivery_address}</Text>
-                  <Text style={localStyles.mapInfoCustomer}>
-                    {selectedOrder.customer_name} • {selectedOrder.customer_phone}
-                  </Text>
+                <View style={styles.mapInfoContent}>
+                  {mapType === 'delivery' ? (
+                    <>
+                      <Text style={[styles.mapInfoAddress, isRTL && { textAlign: 'right' }]}>{selectedOrder.delivery_address}</Text>
+                      <Text style={[styles.mapInfoSub, isRTL && { textAlign: 'right' }]}>{selectedOrder.customer_name} · {selectedOrder.customer_phone}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[styles.mapInfoAddress, isRTL && { textAlign: 'right' }]}>{ot.mapRestaurantTitle}</Text>
+                      <Text style={[styles.mapInfoSub, isRTL && { textAlign: 'right' }]}>{ot.mapRestaurantOrder(selectedOrder.order_number)}</Text>
+                      {selectedOrder.restaurant_lat && selectedOrder.restaurant_lon && (
+                        <Text style={styles.mapInfoCoords}>{Number(selectedOrder.restaurant_lat).toFixed(6)}, {Number(selectedOrder.restaurant_lon).toFixed(6)}</Text>
+                      )}
+                    </>
+                  )}
                 </View>
               </View>
+
               <TouchableOpacity
-                style={localStyles.openMapsButton}
+                style={styles.openMapsBtn}
                 onPress={() => {
                   let url = '';
-                  if (selectedOrder.lat && selectedOrder.lon) {
-                    const lat = selectedOrder.lat;
-                    const lng = selectedOrder.lon;
-                    const label = encodeURIComponent(selectedOrder.customer_name || 'Delivery Request');
-
-                    if (Platform.OS === 'ios') {
-                      url = `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d&t=m`;
+                  if (mapType === 'delivery') {
+                    if (selectedOrder.lat && selectedOrder.lon) {
+                      url = Platform.OS === 'ios'
+                        ? `http://maps.apple.com/?daddr=${selectedOrder.lat},${selectedOrder.lon}&dirflg=d&t=m`
+                        : `https://www.google.com/maps/dir/?api=1&destination=${selectedOrder.lat},${selectedOrder.lon}&travelmode=driving`;
                     } else {
-                      url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+                      const address = encodeURIComponent(selectedOrder.delivery_address);
+                      url = Platform.OS === 'ios'
+                        ? `http://maps.apple.com/?daddr=${address}&dirflg=d&t=m`
+                        : `https://www.google.com/maps/dir/?api=1&destination=${address}&travelmode=driving`;
                     }
                   } else {
-                    const address = encodeURIComponent(selectedOrder.delivery_address);
-                    url = Platform.OS === 'ios'
-                      ? `http://maps.apple.com/?daddr=${address}&dirflg=d&t=m`
-                      : `https://www.google.com/maps/dir/?api=1&destination=${address}&travelmode=driving`;
+                    if (selectedOrder.restaurant_lat && selectedOrder.restaurant_lon) {
+                      url = Platform.OS === 'ios'
+                        ? `http://maps.apple.com/?daddr=${selectedOrder.restaurant_lat},${selectedOrder.restaurant_lon}&dirflg=d&t=m`
+                        : `https://www.google.com/maps/dir/?api=1&destination=${selectedOrder.restaurant_lat},${selectedOrder.restaurant_lon}&travelmode=driving`;
+                    } else {
+                      Alert.alert(ct.error, ot.alertNoRestCoords); return;
+                    }
                   }
                   Linking.openURL(url);
-                }}>
-                <Ionicons name="navigate" size={20} color={Colors.dark} />
-                <Text style={localStyles.openMapsButtonText}>Open in Maps</Text>
+                }}
+              >
+                <Ionicons name="navigate" size={18} color={DS.colors.bg} />
+                <Text style={styles.openMapsBtnText}>{ot.openInMaps}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1071,520 +1376,181 @@ const ActiveOrdersScreen: React.FC = () => {
   );
 };
 
-const localStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    paddingTop: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    letterSpacing: -0.5,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '500',
-  },
-  headerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  headerStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  headerStatText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  headerStatDivider: {
-    width: 1,
-    height: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    marginHorizontal: 10,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
-  },
-  statCard: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    padding: 10,
-    borderRadius: 14,
-    gap: 10,
-  },
-  statIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statContent: {
-    flex: 1,
-  },
-  statValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#0F172A',
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-  segmentedControl: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    padding: 4,
-    marginHorizontal: 16,
-    marginVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  segment: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
-    gap: 6,
-  },
-  segmentActive: {
-    backgroundColor: Colors.primary + '15',
-  },
-  segmentText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  segmentTextActive: {
-    color: Colors.primary,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingTop: 0,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  sectionBadge: {
-    backgroundColor: '#E2E8F0',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  sectionBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#334155',
-  },
-  pulseBadge: {
-    backgroundColor: '#FEF3E2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pulseDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#F97316',
-  },
-  orderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  orderInfo: {
-    flex: 1,
-  },
-  orderNumberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  orderNumber: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.primary,
-    letterSpacing: -0.3,
-  },
-  customerName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 4,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  itemsPreview: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  itemsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  itemsCount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  itemsSummary: {
-    fontSize: 14,
-    color: '#0F172A',
-    lineHeight: 20,
-  },
-  detailsGrid: {
-    gap: 10,
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  detailText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#334155',
-    lineHeight: 20,
-  },
-  paymentRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
-    marginVertical: 4,
-  },
-  paymentMethod: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  paymentText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  deliveryFee: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  deliveryFeeText: {
-    fontSize: 13,
-    color: '#334155',
-    fontWeight: '500',
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 4,
-  },
-  totalLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 8,
-  },
-  actionButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  statusMessage: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF3E2',
-    padding: 12,
-    borderRadius: 14,
-    marginTop: 12,
-    gap: 10,
-  },
-  statusMessageText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#F97316',
-    fontWeight: '500',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  emptyStateIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#F1F5F9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 8,
-  },
-  emptyStateSubtitle: {
-    fontSize: 14,
-    color: '#64748B',
-    textAlign: 'center',
-  },
-  ratingContainer: {
-    backgroundColor: '#FEF3E2',
-    borderRadius: 14,
-    padding: 12,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#FED7AA',
-  },
-  ratingStars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    marginBottom: 6,
-  },
-  ratingValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0F172A',
-    marginLeft: 8,
-  },
-  ratingComment: {
-    fontSize: 13,
-    color: '#334155',
-    fontStyle: 'italic',
-  },
-  noRatingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F8FAFC',
-    padding: 12,
-    borderRadius: 14,
-    marginTop: 12,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  noRatingText: {
-    fontSize: 13,
-    color: '#64748B',
-  },
-  mapContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  mapHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.dark,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  mapCloseButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapHeaderTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  mapWebView: {
-    flex: 1,
-  },
-  mapLoadingContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-  },
-  mapLoadingText: {
-    marginTop: 12,
-    fontSize: 15,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-  mapInfo: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-  },
-  mapInfoHeader: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  mapInfoIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FEE2E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapInfoContent: {
-    flex: 1,
-  },
-  mapInfoAddress: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0F172A',
-    marginBottom: 4,
-    lineHeight: 22,
-  },
-  mapInfoCustomer: {
-    fontSize: 14,
-    color: '#64748B',
-  },
-  openMapsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 14,
-    gap: 8,
-  },
-  openMapsButtonText: {
-    color: Colors.dark,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+// ─────────────────────────────────────────────
+// Styles  (all unchanged from original)
+// ─────────────────────────────────────────────
+const sc = StyleSheet.create({
+  financeWrap: {
+  borderTopWidth: 1,
+  borderTopColor: DS.colors.sep,
+  paddingTop: DS.sp.md,
+  marginBottom: DS.sp.md,
+},
+
+priceBox: {
+  gap: DS.sp.sm,
+},
+
+priceRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+},
+
+priceLabel: {
+  fontSize: 13,
+  color: DS.colors.gray2,
+  flex: 1,
+},
+
+priceValue: {
+  fontSize: 13,
+  color: DS.colors.gray1,
+  fontWeight: '600',
+},
+
+priceDivider: {
+  height: 1,
+  backgroundColor: DS.colors.sep,
+  marginVertical: 4,
+},
+
+totalLabel: {
+  fontSize: 14,
+  fontWeight: '700',
+  color: DS.colors.white,
+  flex: 1,
+},
+
+totalValue: {
+  fontSize: 16,
+  fontWeight: '800',
+  color: DS.colors.accent,
+},
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: DS.r.round, borderWidth: 1 },
+  badgeText: { fontSize: 11, fontWeight: '700' },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: DS.r.md, borderWidth: 1, gap: 6, minHeight: 46 },
+  actionBtnText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  statCard: { flex: 1, backgroundColor: DS.colors.bgCard, borderRadius: DS.r.md, padding: DS.sp.md, alignItems: 'center', borderWidth: 1, borderColor: DS.colors.sep },
+  statIconWrap: { width: 32, height: 32, borderRadius: DS.r.sm, justifyContent: 'center', alignItems: 'center', marginBottom: DS.sp.sm },
+  statVal: { fontSize: 14, fontWeight: '800', color: DS.colors.white, marginBottom: 2 },
+  statLbl: { fontSize: 10, fontWeight: '600', color: DS.colors.gray3, letterSpacing: 0.5, textAlign: 'center' },
+  dots: { fontSize: 14, color: DS.colors.gray3, letterSpacing: 2 },
+  card: { flexDirection: 'row', backgroundColor: DS.colors.bgCard, borderRadius: DS.r.lg, marginBottom: DS.sp.md, borderWidth: 1, borderColor: DS.colors.sep, overflow: 'hidden' },
+  cardAccentBar: { width: 3 },
+  cardBody: { flex: 1, padding: DS.sp.lg, paddingBottom: DS.sp.xl },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: DS.sp.md },
+  cardHeaderLeft: { flex: 1, marginRight: DS.sp.sm },
+  orderNumRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  orderNum: { fontSize: 12, fontWeight: '600', color: DS.colors.accent, letterSpacing: -0.2 },
+  customerName: { fontSize: 17, fontWeight: '700', color: DS.colors.white },
+  restaurantRow: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm, backgroundColor: DS.colors.bgCardAlt, borderRadius: DS.r.sm, padding: DS.sp.sm, marginBottom: DS.sp.md, borderWidth: 1, borderColor: DS.colors.sep },
+  restaurantLogoWrap: { width: 30, height: 30, borderRadius: 15, backgroundColor: DS.colors.accentDim, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: DS.colors.accentBorder },
+  restaurantLogoImg: { width: 26, height: 26, borderRadius: 13 },
+  restaurantName: { fontSize: 14, fontWeight: '600', color: DS.colors.gray1, flex: 1 },
+  itemsBox: { backgroundColor: DS.colors.bgCardAlt, borderRadius: DS.r.sm, padding: DS.sp.md, marginBottom: DS.sp.md, borderWidth: 1, borderColor: DS.colors.sep },
+  itemsHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  itemsCount: { fontSize: 12, fontWeight: '600', color: DS.colors.gray2 },
+  itemsSummary: { fontSize: 13, color: DS.colors.gray1, lineHeight: 18 },
+
+  // Deal type badge (shown in items header)
+  dealTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: DS.colors.purpleDim, paddingHorizontal: 7, paddingVertical: 2, borderRadius: DS.r.round, borderWidth: 1, borderColor: DS.colors.purple + '44', marginLeft: DS.sp.sm },
+  dealTypeBadgeText: { fontSize: 10, fontWeight: '700', color: DS.colors.purple },
+
+  // Deals list
+  dealsList: { gap: DS.sp.xs, marginTop: DS.sp.xs },
+  dealRow: { flexDirection: 'row', alignItems: 'flex-start', gap: DS.sp.sm },
+  dealIconWrap: { width: 20, height: 20, borderRadius: DS.r.sm, backgroundColor: DS.colors.purpleDim, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: DS.colors.purple + '33' },
+  dealInfo: { flex: 1 },
+  dealName: { fontSize: 13, fontWeight: '600', color: DS.colors.white, lineHeight: 18 },
+  dealPriceRow: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm, marginTop: 2 },
+  dealOriginalPrice: { fontSize: 11, color: DS.colors.gray3, textDecorationLine: 'line-through' },
+  dealFinalPrice: { fontSize: 12, fontWeight: '700', color: DS.colors.purple },
+
+  // Divider between deals and regular items
+  itemsDealDivider: { height: 1, backgroundColor: DS.colors.sep, marginVertical: DS.sp.sm },
+
+  // Regular items with size support
+  regularItemsList: { gap: DS.sp.xs },
+  regularItemRow: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm, flexWrap: 'wrap' },
+  regularItemName: { fontSize: 13, color: DS.colors.gray1, flex: 1, lineHeight: 18 },
+  regularItemPrice: { fontSize: 12, fontWeight: '600', color: DS.colors.gray2 },
+
+  // Size badge
+  sizeBadge: { backgroundColor: DS.colors.bgCardAlt, paddingHorizontal: 6, paddingVertical: 2, borderRadius: DS.r.sm, borderWidth: 1, borderColor: DS.colors.sep },
+  sizeBadgeText: { fontSize: 10, fontWeight: '700', color: DS.colors.blue },
+  detailsGrid: { gap: DS.sp.sm, marginBottom: DS.sp.md },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: DS.sp.sm },
+  detailText: { flex: 1, fontSize: 13, color: DS.colors.gray1, lineHeight: 18 },
+  financeRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: DS.sp.sm, borderTopWidth: 1, borderTopColor: DS.colors.sep, paddingTop: DS.sp.md, marginBottom: DS.sp.md },
+  paymentChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  paymentText: { fontSize: 12, fontWeight: '600' },
+  feeChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  feeText: { fontSize: 12, color: DS.colors.gray2, fontWeight: '500' },
+  totalChip: { marginLeft: 'auto' as any },
+  totalText: { fontSize: 16, fontWeight: '800', color: DS.colors.accent },
+  actionRow: { flexDirection: 'row', gap: DS.sp.sm, marginTop: DS.sp.xs },
+  statusMsg: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm, backgroundColor: DS.colors.amberDim, borderWidth: 1, borderColor: DS.colors.amber + '33', padding: DS.sp.md, borderRadius: DS.r.md, marginTop: DS.sp.md },
+  pulseDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: DS.colors.orange },
+  statusMsgText: { flex: 1, fontSize: 12, color: DS.colors.amber, fontWeight: '500' },
+  ratingBox: { backgroundColor: DS.colors.amberDim, borderRadius: DS.r.md, padding: DS.sp.md, marginTop: DS.sp.md, borderWidth: 1, borderColor: DS.colors.amber + '33' },
+  ratingStars: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 4 },
+  ratingVal: { fontSize: 12, fontWeight: '700', color: DS.colors.white, marginLeft: 6 },
+  ratingComment: { fontSize: 12, color: DS.colors.gray1, fontStyle: 'italic' },
+  noRatingBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: DS.sp.sm, backgroundColor: DS.colors.bgCardAlt, borderRadius: DS.r.md, padding: DS.sp.md, marginTop: DS.sp.md, borderWidth: 1, borderColor: DS.colors.sep },
+  noRatingText: { fontSize: 12, color: DS.colors.gray3 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: DS.sp.md },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm },
+  sectionDot: { width: 7, height: 7, borderRadius: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: DS.colors.gray1, letterSpacing: 0.5, textTransform: 'uppercase' },
+  sectionBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: DS.colors.bgCardAlt, paddingHorizontal: 10, paddingVertical: 4, borderRadius: DS.r.round, borderWidth: 1, borderColor: DS.colors.sep },
+  sectionBadgeText: { fontSize: 12, fontWeight: '700', color: DS.colors.gray2 },
+});
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: DS.colors.bg },
+  topBar: { paddingHorizontal: DS.sp.lg, paddingBottom: DS.sp.lg, paddingTop: DS.sp.sm, overflow: 'hidden' },
+  topBarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  topBarEyebrow: { fontSize: 10, fontWeight: '700', color: DS.colors.accent, letterSpacing: 1.4, marginBottom: 2 },
+  topBarTitle: { fontSize: 22, fontWeight: '800', color: DS.colors.white, letterSpacing: -0.5 },
+  topBarIconWrap: { width: 40, height: 40, borderRadius: DS.r.md, backgroundColor: DS.colors.bgCardAlt, borderWidth: 1, borderColor: DS.colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
+  topBarMeta: { flexDirection: 'row', alignItems: 'center' },
+  topBarChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: DS.colors.accentDim, paddingHorizontal: DS.sp.sm, paddingVertical: DS.sp.xs, borderRadius: DS.r.round, borderWidth: 1, borderColor: DS.colors.accentBorder },
+  topBarChipText: { fontSize: 11, fontWeight: '700', color: DS.colors.accent },
+  topBarAccentLine: { height: 2, backgroundColor: DS.colors.accent, marginTop: DS.sp.md, borderRadius: 1, opacity: 0.6 },
+  statsStrip: { flexDirection: 'row', gap: DS.sp.sm, paddingHorizontal: DS.sp.lg, paddingVertical: DS.sp.md, backgroundColor: DS.colors.bg },
+  tabBar: { flexDirection: 'row', marginHorizontal: DS.sp.lg, marginBottom: DS.sp.md, backgroundColor: DS.colors.bgCard, borderRadius: DS.r.md, borderWidth: 1, borderColor: DS.colors.sep, padding: 3 },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: DS.r.sm, gap: DS.sp.xs },
+  tabActive: { backgroundColor: DS.colors.accentDim, borderWidth: 1, borderColor: DS.colors.accentBorder },
+  tabText: { fontSize: 12, fontWeight: '600', color: DS.colors.gray3 },
+  tabTextActive: { color: DS.colors.accent, fontWeight: '700' },
+  tabBadge: { minWidth: 18, height: 18, borderRadius: DS.r.round, backgroundColor: DS.colors.bgCardAlt, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+  tabBadgeActive: { backgroundColor: DS.colors.accent },
+  tabBadgeText: { fontSize: 10, fontWeight: '800', color: DS.colors.gray2 },
+  tabBadgeTextActive: { color: DS.colors.bg },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: DS.sp.lg, paddingTop: DS.sp.xs },
+  section: { marginBottom: DS.sp.xl },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: DS.colors.bgCardAlt, justifyContent: 'center', alignItems: 'center', marginBottom: DS.sp.lg, borderWidth: 1, borderColor: DS.colors.sep },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: DS.colors.gray1, marginBottom: DS.sp.sm },
+  emptySub: { fontSize: 13, color: DS.colors.gray3, textAlign: 'center' },
+  mapContainer: { flex: 1, backgroundColor: DS.colors.bg },
+  mapHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: DS.colors.headerTop, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingBottom: DS.sp.lg, paddingHorizontal: DS.sp.lg, borderBottomWidth: 1, borderBottomColor: DS.colors.sep },
+  mapCloseBtn: { width: 38, height: 38, borderRadius: DS.r.sm, backgroundColor: DS.colors.bgCardAlt, borderWidth: 1, borderColor: DS.colors.sep, justifyContent: 'center', alignItems: 'center' },
+  mapHeaderTitle: { fontSize: 16, fontWeight: '700', color: DS.colors.white },
+  mapWebView: { flex: 1 },
+  mapLoadingWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: DS.colors.bg },
+  mapLoadingText: { marginTop: DS.sp.md, fontSize: 14, color: DS.colors.gray2, fontWeight: '500' },
+  mapInfo: { backgroundColor: DS.colors.bgCard, padding: DS.sp.lg, borderTopWidth: 1, borderTopColor: DS.colors.sep },
+  mapInfoHeader: { flexDirection: 'row', gap: DS.sp.md, marginBottom: DS.sp.md },
+  mapInfoIcon: { width: 42, height: 42, borderRadius: DS.r.md, backgroundColor: DS.colors.dangerDim, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: DS.colors.danger + '33' },
+  mapInfoContent: { flex: 1 },
+  mapInfoAddress: { fontSize: 15, fontWeight: '700', color: DS.colors.white, marginBottom: 3, lineHeight: 20 },
+  mapInfoSub: { fontSize: 13, color: DS.colors.gray2 },
+  mapInfoCoords: { fontSize: 11, color: DS.colors.gray3, marginTop: 3 },
+  openMapsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: DS.colors.accent, paddingVertical: 14, borderRadius: DS.r.md, gap: DS.sp.sm, ...Platform.select({ ios: { shadowColor: DS.colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8 }, android: { elevation: 6 } }) },
+  openMapsBtnText: { color: DS.colors.bg, fontSize: 15, fontWeight: '700' },
 });
 
 export default ActiveOrdersScreen;

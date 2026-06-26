@@ -1,39 +1,51 @@
 {
   "project_info": {
-    "project_number": "925005686846",
-    "project_id": "restaurant-app-1cf7b",
-    "storage_bucket": "restaurant-app-1cf7b.firebasestorage.app"
+    "project_number": "67245894781",
+    "project_id": "zesty-food-app-9811c",
+    "storage_bucket": "zesty-food-app-9811c.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:925005686846:android:4fdf879e92566c9753896f",
+        "mobilesdk_app_id": "1:67245894781:android:a48ace214c6bd1475bd514",
         "android_client_info": {
-        "package_name": "com.younesthegoat.restaurantapp"
+          "package_name": "com.zestyapp.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "925005686846-c9lonjd1uq7qvi95228hdt1s6ppdlbg9.apps.googleusercontent.com",
+          "client_id": "67245894781-k9th642ie545nk9v7cc0i1dfrd1c2lb8.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-          "package_name": "com.younesthegoat.restaurantapp",
-          "certificate_hash": "18D65AA0E6D1498DA764C84A8A1664C9941F23E7" 
-        }
+            "package_name": "com.zestyapp.app",
+            "certificate_hash": "dbb1b1801799193e436d64946633260c192aa83b"
+          }
         },
         {
-         "client_id": "925005686846-t5dj1p024m13u8lqvvbtadlema5slpjo.apps.googleusercontent.com",
+          "client_id": "67245894781-l9o31804krq7fi18u3m0ugqgibj3k51q.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyCx4qoEgZzG3A7VW9_gxpEWAqMSeNs_DfY"
+          "current_key": "AIzaSyDMq3CwLqtsiT-SAuE8SWke2bV-6x5DhhQ"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "67245894781-l9o31804krq7fi18u3m0ugqgibj3k51q.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "67245894781-l7dqvfd6gaes66scte9nna0dgh1s2gbq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.zestyapp.app"
+              }
+            }
+          ]
         }
       }
     }

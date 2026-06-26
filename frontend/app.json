@@ -5,8 +5,8 @@
       "backgroundColor": "#1A1D21",
       "resizeMode": "contain"
     },
-    "name": "Zesty",
-    "slug": "lamadone-food-delivery-app",
+    "name": "Zesty Driver",
+    "slug": "zesty-food-delivery-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/zesty-driver-icon.png",
@@ -61,7 +61,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.younesthegoat.restaurantapp",
+      "bundleIdentifier": "com.zestyapp.app",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -78,7 +78,7 @@
       }
     },
     "android": {
-      "package": "com.younesthegoat.restaurantapp",
+      "package": "com.zestyapp.app",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
@@ -104,7 +104,7 @@
         }
       }
     },
-    "owner": "younesjuniordev",
+    "owner": "zestyproductionvers",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -114,9 +114,7 @@
       "fallbackToCacheTimeout": 0
     },
     "extra": {
-      "eas": {
-        "projectId": "f3a1df83-2a60-4506-a777-372c318cc2da"
-      }
+      "eas": {}
     }
   }
 }

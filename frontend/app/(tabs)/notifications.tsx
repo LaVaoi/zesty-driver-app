@@ -319,6 +319,7 @@ const NotificationsScreen: React.FC = () => {
       const response = await fetch('https://ubua.cloud/api/delivery/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       });
+      console.log('zap h', await response.json());
 
       if (response.ok) {
         const data = await response.json();

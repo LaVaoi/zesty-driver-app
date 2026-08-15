@@ -9,10 +9,10 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
-  FlatList,
   SafeAreaView,
   Platform,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -250,6 +250,8 @@ const ErrorState = ({
 // ─────────────────────────────────────────────
 const NotificationsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  // Mirrors the tab bar in app/(tabs)/_layout.tsx: bottom: SPACING.lg, height: 64 + insets.bottom
+  const tabBarClearance = 16 + 64 + insets.bottom + 24;
   const { t, isRTL } = useLanguage();
   const nt = t.notifications;
 
@@ -319,7 +321,7 @@ const NotificationsScreen: React.FC = () => {
       const response = await fetch('https://ubua.cloud/api/delivery/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('zap h', await response.json());
+      // console.log('zap h', await response.json());
 
       if (response.ok) {
         const data = await response.json();
@@ -552,54 +554,52 @@ const NotificationsScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       {renderHeader()}
-      <FlatList
-        data={notifications}
-        keyExtractor={item => item.id.toString()}
-        renderItem={({ item }) => (
-          <NotificationCard
-            notification={item}
-            isLiveNotification={liveNotifications.some(n => n.id === item.id)}
-            onPress={() => {
-              if (item.is_read === 0) {
-                markAsRead(item.id);
-              }
-            }}
-            getIconName={getNotificationIcon}
-            getIconColor={getNotificationColor}
-            formatDate={formatDate}
-            liveChipLabel={nt.liveChip}
-          />
-        )}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={C.accent}
-            colors={[C.accent]}
-          />
+      <FlashList
+  data={notifications}
+  keyExtractor={item => item.id.toString()}
+  renderItem={({ item }) => (
+    <NotificationCard
+      notification={item}
+      isLiveNotification={liveNotifications.some(n => n.id === item.id)}
+      onPress={() => {
+        if (item.is_read === 0) {
+          markAsRead(item.id);
         }
-        ListEmptyComponent={
-          error ? (
-            <ErrorState
-              onRetry={fetchNotifications}
-              title={nt.errorTitle}
-              sub={nt.errorSub}
-              btnLabel={t.common.retry}
-            />
-          ) : (
-            <EmptyState
-              onRefresh={onRefresh}
-              title={nt.noNotifications}
-              sub={nt.noNotificationsSub}
-              btnLabel={t.common.refresh}
-            />
-          )
-        }
-        showsVerticalScrollIndicator={false}
-        maxToRenderPerBatch={10}
-        windowSize={5}
+      }}
+      getIconName={getNotificationIcon}
+      getIconColor={getNotificationColor}
+      formatDate={formatDate}
+      liveChipLabel={nt.liveChip}
+    />
+  )}
+  contentContainerStyle={[styles.listContent, { paddingBottom: tabBarClearance }]}
+  refreshControl={
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor={C.accent}
+      colors={[C.accent]}
+    />
+  }
+  ListEmptyComponent={
+    error ? (
+      <ErrorState
+        onRetry={fetchNotifications}
+        title={nt.errorTitle}
+        sub={nt.errorSub}
+        btnLabel={t.common.retry}
       />
+    ) : (
+      <EmptyState
+        onRefresh={onRefresh}
+        title={nt.noNotifications}
+        sub={nt.noNotificationsSub}
+        btnLabel={t.common.refresh}
+      />
+    )
+  }
+  showsVerticalScrollIndicator={false}
+/>
     </SafeAreaView>
   );
 };
@@ -729,7 +729,7 @@ const sc = StyleSheet.create({
 // Main StyleSheet  (unchanged + rtl helpers)
 // ─────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: C.bg, paddingBottom: 70 },
+  safeArea: { flex: 1, backgroundColor: C.bg },
   header: {
     paddingHorizontal: SP.lg,
     paddingBottom:     SP.lg,

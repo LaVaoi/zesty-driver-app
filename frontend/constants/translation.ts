@@ -58,7 +58,7 @@ const en = {
   tabs: {
     home:          'HOME',
     orders:        'ORDERS',
-    alerts:        'ALERTS',
+    alerts:        'NOTIFICATIONS',
     profile:       'PROFILE',
   },
 
@@ -312,7 +312,7 @@ const ar: TranslationSchema = {
   tabs: {
     home:          'الرئيسية',
     orders:        'الطلبات',
-    alerts:        'التنبيهات',
+    alerts:        'الإشعارات',
     profile:       'الملف',
   },
 

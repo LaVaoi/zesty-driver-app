@@ -2,6 +2,11 @@
   "name": "restaurant-app",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "expo": {
+    "autolinking": {
+      "legacy_shallowReactNativeLinking": true
+    }
+  },
   "scripts": {
     "start": "expo start",
     "start:dev": "expo start",

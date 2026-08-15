@@ -6,11 +6,11 @@
       "resizeMode": "contain"
     },
     "name": "Zesty Driver",
-    "slug": "zesty-food-delivery-app",
+    "slug": "zesty-driver-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/zesty-driver-icon.png",
-    "scheme": "restaurantapp",
+    "scheme": "zestydriver",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "plugins": [
@@ -61,7 +61,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.zestyapp.app",
+      "bundleIdentifier": "com.zesty.driver",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -78,7 +78,7 @@
       }
     },
     "android": {
-      "package": "com.zestyapp.app",
+      "package": "com.zesty.driver",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
@@ -114,7 +114,9 @@
       "fallbackToCacheTimeout": 0
     },
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "a19ebb1c-f64c-4b92-b30f-a5d5f6628cab"
+      }
     }
   }
 }

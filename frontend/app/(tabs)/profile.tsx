@@ -1,5 +1,7 @@
 // app/(tabs)/profile.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { NativeModules } from 'react-native';
+const { LocationTracking } = NativeModules;
 import {
   View,
   Text,
@@ -415,9 +417,6 @@ const updateLocation = useCallback(async () => {
 
   useEffect(() => {
     fetchProfile();
-    const locationInterval = setInterval(updateLocation, 30000);
-    updateLocation();
-    return () => clearInterval(locationInterval);
   }, [fetchProfile, updateLocation]);
 
   const handleLogout = () => {
@@ -427,12 +426,13 @@ const updateLocation = useCallback(async () => {
         text: pt.alertLogoutBtn,
         style: 'destructive',
         onPress: async () => {
-          try {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            isMounted.current = false; // ← add this FIRST
-            await AsyncStorage.multiRemove(['deliveryManToken', 'deliveryMan']);
-            router.replace('/login');
-          } catch (error) {
+        try {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          LocationTracking.stopTracking(); // ← add this
+          isMounted.current = false;
+          await AsyncStorage.multiRemove(['deliveryManToken', 'deliveryMan']);
+          router.replace('/login');
+        } catch (error) {
             console.error('Error during logout:', error);
             isMounted.current = true;
           }
@@ -440,6 +440,40 @@ const updateLocation = useCallback(async () => {
       },
     ]);
   };
+
+  const handleToggleOnline = async () => {
+  try {
+    const token = await AsyncStorage.getItem('deliveryManToken');
+    if (!token) return;
+
+    const newStatus = isActive ? 0 : 1;
+
+    await fetch('https://ubua.cloud/api/delivery/toggle-status', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ is_active: newStatus }),
+    });
+
+    if (newStatus === 1) {
+      // Driver going online → start background location
+      LocationTracking.startTracking(
+        token,
+        'https://ubua.cloud/api/delivery/update-location'
+      );
+    } else {
+      // Driver going offline → stop background location
+      LocationTracking.stopTracking();
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    fetchProfile(); // refresh UI
+  } catch (error) {
+    console.error('Error toggling status:', error);
+  }
+};
 
   const pickImage = async (source: 'camera' | 'library') => {
     try {
@@ -585,8 +619,10 @@ const updateLocation = useCallback(async () => {
   const documentStatus: 'verified' | 'pending' | 'missing' = 'verified';
   const isActive = !!deliveryMan.is_active;
 
+  const tabBarClearance = 16 /* SPACING.lg bottom offset */ + 64 /* tab bar base height */ + insets.bottom + 24 /* buffer above the pill */;
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: 70 }]}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
 
       {/* ── Top Bar ── */}
       <LinearGradient colors={[T.colors.headerGrad1, T.colors.headerGrad2]} style={styles.topBar}>
@@ -624,7 +660,11 @@ const updateLocation = useCallback(async () => {
       </LinearGradient>
 
       {/* ── Scrollable Body ── */}
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBarClearance }]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* ── HERO HEADER ── */}
         <View style={styles.heroContainer}>

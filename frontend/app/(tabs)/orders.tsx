@@ -1,6 +1,8 @@
 // app/(tabs)/orders.tsx
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import * as Linking from 'expo-linking';
+import { NativeModules } from 'react-native';
+const { DriverAlarm } = NativeModules;
 import {
   View,
   Text,
@@ -23,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { WebView } from 'react-native-webview';
+import { FlashList } from '@shopify/flash-list';
 import Colors from '@/constants/Colors';
 import { OrderCardSkeleton } from '@/components/ui/skeleton';
 import { realtimeService } from '../services/realtimeService';
@@ -70,6 +73,18 @@ const DS = {
 // ─────────────────────────────────────────────
 // Interfaces  (unchanged)
 // ─────────────────────────────────────────────
+interface SelectedOption {
+  group_id: number;
+  option_id: number;
+  group_name: string;
+  option_name: string;
+  price_delta: number;
+  group_name_ar?: string;
+  group_name_fr?: string;
+  option_name_ar?: string;
+  option_name_fr?: string;
+}
+
 interface OrderItem {
   product_name: string;
   quantity: number;
@@ -79,6 +94,8 @@ interface OrderItem {
   size_id?: string | null;
   size_name?: string | null;
   size_price?: number | null;
+  // Options (present when item has add-ons/choices selected)
+  options?: SelectedOption[] | null;
 }
 
 interface OrderDeal {
@@ -87,6 +104,7 @@ interface OrderDeal {
   quantity: number;
   deal_price: number;
   real_price_deal: number;
+  image?: string | null;
 }
 
 interface Order {
@@ -122,6 +140,9 @@ interface Order {
   restaurant_lon?: number;
   restaurant_name?: string;
   restaurant_logo?: string;
+  special_instructions?: string | null;
+  estimated_preparing_time?: number | null;
+  set_prepared_at?: string | null;
 }
 
 type TabType = 'accepted' | 'availableOrders' | 'delivered';
@@ -242,6 +263,70 @@ const PlaceholderDots = ({ length = 20 }: { length?: number }) => (
 );
 
 // ─────────────────────────────────────────────
+// PrepCountdown
+// ─────────────────────────────────────────────
+const PrepCountdown = ({
+  setPreparedAt,
+  estimatedMinutes,
+  createdAt,
+}: {
+  setPreparedAt?: string | null;
+  estimatedMinutes: number;
+  createdAt: string;
+}) => {
+  const startTime = setPreparedAt ? new Date(setPreparedAt).getTime() : new Date(createdAt).getTime();
+  const targetTime = startTime + estimatedMinutes * 60 * 1000;
+
+  const [remainingMs, setRemainingMs] = useState(targetTime - Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRemainingMs(targetTime - Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [targetTime]);
+
+  const isOverdue = remainingMs <= 0;
+  const absMs = Math.abs(remainingMs);
+  const totalSeconds = Math.floor(absMs / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+  return (
+    <View style={[sc.prepTimeBox, isOverdue && sc.prepTimeBoxOverdue]}>
+      <Ionicons name={isOverdue ? 'alert-circle' : 'timer-outline'} size={14} color={isOverdue ? DS.colors.danger : DS.colors.amber} />
+      <Text style={[sc.prepTimeText, isOverdue && { color: DS.colors.danger }]}>
+        {isOverdue ? 'Overdue by ' : 'Ready in '}
+        <Text style={[sc.prepTimeValue, isOverdue && { color: DS.colors.danger }]}>{timeLabel}</Text>
+      </Text>
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// ImagePreviewModal
+// ─────────────────────────────────────────────
+const ImagePreviewModal = ({
+  uri, visible, onClose,
+}: {
+  uri: string | null;
+  visible: boolean;
+  onClose: () => void;
+}) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Pressable style={sc.imagePreviewBackdrop} onPress={onClose}>
+      <View style={[sc.imagePreviewCard, DS.shadow]}>
+        <TouchableOpacity style={sc.imagePreviewCloseBtn} onPress={onClose} activeOpacity={0.7}>
+          <Ionicons name="close" size={20} color={DS.colors.white} />
+        </TouchableOpacity>
+        {uri && <Image source={{ uri }} style={sc.imagePreviewImage} resizeMode="contain" />}
+      </View>
+    </Pressable>
+  </Modal>
+);
+
+// ─────────────────────────────────────────────
 // OrderCard
 // ─────────────────────────────────────────────
 const OrderCard = React.memo(({
@@ -262,6 +347,7 @@ const OrderCard = React.memo(({
   isRTL: boolean;
   hasActiveOrders?: boolean;
 }) => {
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const getPaymentIcon  = useCallback((ps: string) => (ps === 'Paid' ? 'card-outline' : 'cash-outline'), []);
   const getPaymentColor = useCallback((ps: string) => (ps === 'Paid' ? DS.colors.accent : DS.colors.orange), []);
 
@@ -319,6 +405,24 @@ const OrderCard = React.memo(({
           </View>
         )}
 
+        {tabType === 'accepted' && order.order_status === 'preparing' && !!order.estimated_preparing_time && (
+          <PrepCountdown
+            setPreparedAt={order.set_prepared_at}
+            estimatedMinutes={order.estimated_preparing_time}
+            createdAt={order.created_at}
+          />
+        )}
+
+        {!!order.special_instructions && order.special_instructions.trim() !== '' && (
+          <View style={sc.instructionsBox}>
+            <Ionicons name="alert-circle-outline" size={14} color={DS.colors.amber} />
+            <View style={{ flex: 1 }}>
+              <Text style={sc.instructionsLabel}>Special Instructions</Text>
+              <Text style={[sc.instructionsText, isRTL && { textAlign: 'right' }]}>{order.special_instructions}</Text>
+            </View>
+          </View>
+        )}
+
         {/* ── Items / Deals box ── */}
         {((order.items && order.items.length > 0) || (order.deals && order.deals.length > 0)) && (
           <View style={sc.itemsBox}>
@@ -352,9 +456,23 @@ const OrderCard = React.memo(({
                         key={`deal-${deal.deal_id}-${idx}`}
                         style={[sc.dealRow, isRTL && { flexDirection: 'row-reverse' }]}
                       >
-                        <View style={sc.dealIconWrap}>
-                          <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
-                        </View>
+                        <TouchableOpacity
+                          style={sc.dealIconWrap}
+                          activeOpacity={deal.image ? 0.7 : 1}
+                          onPress={() => {
+                            if (!deal.image) return;
+                            setPreviewImage(deal.image.startsWith('http') ? deal.image : `https://ubua.cloud/${deal.image}`);
+                          }}
+                        >
+                          {deal.image ? (
+                            <Image
+                              source={{ uri: deal.image.startsWith('http') ? deal.image : `https://ubua.cloud/${deal.image}` }}
+                              style={sc.dealImage}
+                            />
+                          ) : (
+                            <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
+                          )}
+                        </TouchableOpacity>
                         <View style={[sc.dealInfo, isRTL && { alignItems: 'flex-end' }]}>
                           <Text style={[sc.dealName, isRTL && { textAlign: 'right' }]}>
                             {deal.quantity}× Deal: {deal.deal_name}
@@ -384,26 +502,54 @@ const OrderCard = React.memo(({
                 {order.items && order.items.length > 0 && (
                   <View style={sc.regularItemsList}>
                     {order.items.map((item, idx) => (
-                      <View
-                        key={`item-${idx}`}
-                        style={[sc.regularItemRow, isRTL && { flexDirection: 'row-reverse' }]}
-                      >
-                        <Text style={[sc.regularItemName, isRTL && { textAlign: 'right' }]}>
-                          {item.quantity}× {item.product_name}
-                        </Text>
-                        {item.size_name && (
-                          <View style={sc.sizeBadge}>
-                            <Text style={sc.sizeBadgeText}>{item.size_name}</Text>
+                      <View key={`item-${idx}`}>
+                        <View style={[sc.regularItemRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                          <TouchableOpacity
+                            style={sc.itemImageWrap}
+                            activeOpacity={item.image ? 0.7 : 1}
+                            onPress={() => {
+                              if (!item.image) return;
+                              setPreviewImage(item.image.startsWith('http') ? item.image : `https://ubua.cloud/${item.image}`);
+                            }}
+                          >
+                            {item.image ? (
+                              <Image
+                                source={{ uri: item.image.startsWith('http') ? item.image : `https://ubua.cloud/${item.image}` }}
+                                style={sc.itemImage}
+                              />
+                            ) : (
+                              <Ionicons name="fast-food-outline" size={14} color={DS.colors.gray3} />
+                            )}
+                          </TouchableOpacity>
+                          <Text style={[sc.regularItemName, isRTL && { textAlign: 'right' }]}>
+                            {item.quantity}× {item.product_name}
+                          </Text>
+                          {item.size_name && (
+                            <View style={sc.sizeBadge}>
+                              <Text style={sc.sizeBadgeText}>{item.size_name}</Text>
+                            </View>
+                          )}
+                          <Text style={sc.regularItemPrice}>
+                            {(
+                              ((Number(item.price) || 0) + (Number(item.size_price) || 0)) *
+                              (Number(item.quantity) || 0)
+                            ).toFixed(2)} MAD
+                          </Text>
+                        </View>
+                        {item.options && item.options.length > 0 && (
+                          <View style={[sc.optionsRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                            {item.options.map((opt, oIdx) => (
+                              <View key={`opt-${oIdx}`} style={sc.optionBadge}>
+                                <Text style={sc.optionBadgeText}>
+                                  {opt.option_name}
+                                  {opt.price_delta ? ` (+${Number(opt.price_delta).toFixed(2)} MAD)` : ''}
+                                </Text>
+                              </View>
+                            ))}
                           </View>
                         )}
-                        <Text style={sc.regularItemPrice}>
-                          {(
-                            ((Number(item.price) || 0) + (Number(item.size_price) || 0)) *
-                            (Number(item.quantity) || 0)
-                          ).toFixed(2)} MAD
-                              </Text>
-                            </View>
-                          ))}
+                      </View>
+                    ))}
                   </View>
                 )}
               </>
@@ -555,6 +701,7 @@ const OrderCard = React.memo(({
           </View>
         )}
       </View>
+      <ImagePreviewModal uri={previewImage} visible={!!previewImage} onClose={() => setPreviewImage(null)} />
     </View>
   );
 });
@@ -568,7 +715,9 @@ const DeliveredOrderCard = React.memo(({
   order: Order;
   ot: ReturnType<typeof useLanguage>['t']['orders'];
   isRTL: boolean;
-}) => (
+}) => {
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  return (
   <View style={[sc.card, DS.shadow]}>
     <View style={[sc.cardAccentBar, { backgroundColor: DS.colors.accent }]} />
     <View style={sc.cardBody}>
@@ -609,7 +758,14 @@ const DeliveredOrderCard = React.memo(({
               {order.deals.map((deal, idx) => (
                 <View key={`deal-${deal.deal_id}-${idx}`} style={[sc.dealRow, isRTL && { flexDirection: 'row-reverse' }]}>
                   <View style={sc.dealIconWrap}>
-                    <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
+                    {deal.image ? (
+                      <Image
+                        source={{ uri: deal.image.startsWith('http') ? deal.image : `https://ubua.cloud/${deal.image}` }}
+                        style={sc.dealImage}
+                      />
+                    ) : (
+                      <Ionicons name="pricetag" size={11} color={DS.colors.purple} />
+                    )}
                   </View>
                   <View style={[sc.dealInfo, isRTL && { alignItems: 'flex-end' }]}>
                     <Text style={[sc.dealName, isRTL && { textAlign: 'right' }]}>
@@ -640,6 +796,16 @@ const DeliveredOrderCard = React.memo(({
             <View style={sc.regularItemsList}>
               {order.items.map((item, idx) => (
                 <View key={`item-${idx}`} style={[sc.regularItemRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                  <View style={sc.itemImageWrap}>
+                    {item.image ? (
+                      <Image
+                        source={{ uri: item.image.startsWith('http') ? item.image : `https://ubua.cloud/${item.image}` }}
+                        style={sc.itemImage}
+                      />
+                    ) : (
+                      <Ionicons name="fast-food-outline" size={14} color={DS.colors.gray3} />
+                    )}
+                  </View>
                   <Text style={[sc.regularItemName, isRTL && { textAlign: 'right' }]}>
                     {item.quantity}× {item.product_name}
                   </Text>
@@ -705,8 +871,10 @@ const DeliveredOrderCard = React.memo(({
         </View>
       )}
     </View>
+    <ImagePreviewModal uri={previewImage} visible={!!previewImage} onClose={() => setPreviewImage(null)} />
   </View>
-));
+  );
+});
 
 // ─────────────────────────────────────────────
 // Section Header
@@ -749,6 +917,7 @@ const ActiveOrdersScreen: React.FC = () => {
   const [mapUrl, setMapUrl]               = useState<string>('');
   const [mapType, setMapType]             = useState<MapType>('delivery');
   const [updatingStatus, setUpdatingStatus] = useState<number | null>(null);
+  const [alarmActive, setAlarmActive] = useState(false);
   const [stats, setStats]                 = useState({
     totalDeliveryFees: 0,
     avgRating:         0,
@@ -781,6 +950,7 @@ const ActiveOrdersScreen: React.FC = () => {
             size_id: item.size_id ?? null,
             size_name: item.size_name ?? null,
             size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+            options: Array.isArray(item.options) ? item.options : [],
           })),
           deals: (o.deals || []).map((d: any) => ({
             deal_id: d.deal_id,
@@ -788,6 +958,7 @@ const ActiveOrdersScreen: React.FC = () => {
             quantity: d.quantity,
             deal_price: parseFloat(d.deal_price ?? 0),
             real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+            image: d.image ?? null,
           })),
         })));
       } else if (pendingResponse.status === 401) {
@@ -808,15 +979,17 @@ const ActiveOrdersScreen: React.FC = () => {
               price: parseFloat(item.price ?? item.price_per_unit ?? 0),
               image: item.image,
               size_id: item.size_id ?? null,
-              size_name: item.size_name ?? null,
-              size_price: item.size_price != null ? parseFloat(item.size_price) : null,
-            })),
+            size_name: item.size_name ?? null,
+            size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+            options: Array.isArray(item.options) ? item.options : [],
+          })),
             deals: (o.deals || []).map((d: any) => ({
               deal_id: d.deal_id,
               deal_name: d.deal_name,
               quantity: d.quantity,
               deal_price: parseFloat(d.deal_price ?? 0),
               real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+              image: d.image ?? null,
             })),
           }));
         const isCancelled = (o: Order) =>
@@ -849,6 +1022,7 @@ const ActiveOrdersScreen: React.FC = () => {
             size_id: item.size_id ?? null,
             size_name: item.size_name ?? null,
             size_price: item.size_price != null ? parseFloat(item.size_price) : null,
+            options: Array.isArray(item.options) ? item.options : [],
           })),
           deals: (o.deals || []).map((d: any) => ({
             deal_id: d.deal_id,
@@ -856,6 +1030,7 @@ const ActiveOrdersScreen: React.FC = () => {
             quantity: d.quantity,
             deal_price: parseFloat(d.deal_price ?? 0),
             real_price_deal: parseFloat(d.real_price_deal ?? d.deal_price ?? 0),
+            image: d.image ?? null,
           })),
         })));
       } else if (deliveredResponse.status === 401) {
@@ -953,11 +1128,24 @@ const updateLocation = useCallback(async () => {
     const unsubscribe = realtimeService.subscribe('orders', fetchOrders, 3000);
     return unsubscribe;
   }, [fetchOrders]);
+  useEffect(() => {
+  const { DeviceEventEmitter } = require('react-native');
+  const sub = DeviceEventEmitter.addListener('order_assigned', () => {
+    setAlarmActive(true);
+  });
+  return () => sub.remove();
+}, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchOrders();
   }, [fetchOrders]);
+
+  const handleStopAlarm = () => {
+  DriverAlarm.stopAlarm();
+  setAlarmActive(false);
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+};
 
   const acceptOrder = async (orderId: number) => {
      if (assignedOrders.length > 0 || pickedUpOrders.length > 0) {
@@ -1143,9 +1331,13 @@ const updateLocation = useCallback(async () => {
               <Text style={[styles.topBarEyebrow, isRTL && { textAlign: 'right' }]}>{t.common.eyebrow}</Text>
               <Text style={[styles.topBarTitle, isRTL && { textAlign: 'right' }]}>{ot.screenTitle}</Text>
             </View>
-            <View style={styles.topBarIconWrap}>
-              <Ionicons name="bicycle" size={22} color={DS.colors.accent} />
-            </View>
+            <TouchableOpacity
+              style={[styles.topBarIconWrap, { backgroundColor: DS.colors.dangerDim, borderColor: DS.colors.danger + '88' }]}
+              onPress={handleStopAlarm}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="volume-mute" size={22} color={DS.colors.danger} />
+            </TouchableOpacity>
           </View>
           <View style={styles.topBarAccentLine} />
         </LinearGradient>
@@ -1172,15 +1364,22 @@ const updateLocation = useCallback(async () => {
             <Text style={[styles.topBarTitle, isRTL && { textAlign: 'right' }]}>{ot.screenTitle}</Text>
           </View>
           <View style={[styles.topBarMeta, isRTL && { flexDirection: 'row-reverse' }]}>
+            <TouchableOpacity
+              style={[styles.topBarIconWrap, { marginRight: DS.sp.sm, backgroundColor: DS.colors.dangerDim, borderColor: DS.colors.danger + '88' }]}
+              onPress={handleStopAlarm}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="volume-mute" size={20} color={DS.colors.danger} />
+            </TouchableOpacity>
             <View style={styles.topBarChip}>
-              <Ionicons name="checkmark-circle" size={13} color={DS.colors.accent} />
-              <Text style={styles.topBarChipText}>{ot.activeChip(assignedOrders.length + pickedUpOrders.length)}</Text>
-            </View>
-            <View style={[styles.topBarChip, { marginLeft: DS.sp.sm }]}>
-              <Ionicons name="checkmark-done" size={13} color={DS.colors.gray2} />
-              <Text style={[styles.topBarChipText, { color: DS.colors.gray2 }]}>{ot.doneChip(deliveredOrders.length)}</Text>
-            </View>
+            <Ionicons name="checkmark-circle" size={13} color={DS.colors.accent} />
+            <Text style={styles.topBarChipText}>{ot.activeChip(assignedOrders.length + pickedUpOrders.length)}</Text>
           </View>
+          <View style={[styles.topBarChip, { marginLeft: DS.sp.sm }]}>
+            <Ionicons name="checkmark-done" size={13} color={DS.colors.gray2} />
+            <Text style={[styles.topBarChipText, { color: DS.colors.gray2 }]}>{ot.doneChip(deliveredOrders.length)}</Text>
+          </View>
+        </View>
         </View>
         <View style={styles.topBarAccentLine} />
       </LinearGradient>
@@ -1213,74 +1412,90 @@ const updateLocation = useCallback(async () => {
         })}
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={DS.colors.accent} colors={[DS.colors.accent]} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? renderSkeleton()
-          : activeTab === 'delivered' ? (
-            deliveredOrders.length > 0
-              ? (<View style={styles.section}>{deliveredOrders.map(order => <DeliveredOrderCard key={order.id} order={order} ot={ot} isRTL={isRTL} />)}</View>)
-              : (<View style={styles.emptyState}>
-                  <View style={styles.emptyIconWrap}><Ionicons name="checkmark-done" size={36} color={DS.colors.gray3} /></View>
-                  <Text style={styles.emptyTitle}>{ot.emptyDone}</Text>
-                  <Text style={styles.emptySub}>{ot.emptyDoneSub}</Text>
-                </View>)
-          ) : activeTab === 'availableOrders' ? (
-            orders.length > 0
-              ? (<View style={styles.section}>
-                  <SectionHeader title={ot.sectionAvailable} count={orders.length} dotColor={DS.colors.accent} isRTL={isRTL} />
-                  {orders.map(order => (
-                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
-                    onShowRestaurantLocation={handleShowRestaurantLocation} onAccept={acceptOrder}
-                    updatingStatus={updatingStatus} tabType="availableOrders" ot={ot} isRTL={isRTL}
-                    hasActiveOrders={assignedOrders.length > 0 || pickedUpOrders.length > 0} />
-                  ))}
-                </View>)
-              : (<View style={styles.emptyState}>
-                  <View style={styles.emptyIconWrap}><Ionicons name="checkmark-circle" size={36} color={DS.colors.gray3} /></View>
-                  <Text style={styles.emptyTitle}>{ot.emptyAvailable}</Text>
-                  <Text style={styles.emptySub}>{ot.emptyAvailableSub}</Text>
-                </View>)
-          ) : (
-            <>
-              {pickedUpOrders.length > 0 && (
-                <View style={styles.section}>
-                  <SectionHeader title={ot.sectionOnTheWay} count={pickedUpOrders.length} dotColor={DS.colors.blue} isRTL={isRTL} />
-                  {pickedUpOrders.map(order => (
-                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
-                      onShowRestaurantLocation={handleShowRestaurantLocation} onMarkDelivered={markAsDelivered}
-                      updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
-                  ))}
-                </View>
-              )}
-              {assignedOrders.length > 0 && (
-                <View style={styles.section}>
-                  <SectionHeader title={ot.sectionAssigned} count={assignedOrders.length} dotColor={DS.colors.orange} pulse isRTL={isRTL} />
-                  {assignedOrders.map(order => (
-                    <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
-                      onShowRestaurantLocation={handleShowRestaurantLocation} onPickUp={markAsPickedUp}
-                      updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
-                  ))}
-                </View>
-              )}
-              {assignedOrders.length === 0 && pickedUpOrders.length === 0 && (
-                <View style={styles.emptyState}>
-                  <View style={styles.emptyIconWrap}><Ionicons name="bicycle" size={36} color={DS.colors.gray3} /></View>
-                  <Text style={styles.emptyTitle}>{ot.emptyActive}</Text>
-                  <Text style={styles.emptySub}>{ot.emptyActiveSub}</Text>
-                </View>
-              )}
-            </>
-          )
-        }
-      </ScrollView>
+      {loading ? (
+        <ScrollView style={styles.scroll} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]} showsVerticalScrollIndicator={false}>
+          {renderSkeleton()}
+        </ScrollView>
+      ) : activeTab === 'delivered' ? (
+        <FlashList
+          style={styles.scroll}
+          data={deliveredOrders}
+          keyExtractor={(order) => String(order.id)}
+          renderItem={({ item }) => <DeliveredOrderCard order={item} ot={ot} isRTL={isRTL} />}
+          contentContainerStyle={{ paddingHorizontal: DS.sp.lg, paddingTop: DS.sp.xs, paddingBottom: insets.bottom + 16 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={DS.colors.accent} colors={[DS.colors.accent]} />}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconWrap}><Ionicons name="checkmark-done" size={36} color={DS.colors.gray3} /></View>
+              <Text style={styles.emptyTitle}>{ot.emptyDone}</Text>
+              <Text style={styles.emptySub}>{ot.emptyDoneSub}</Text>
+            </View>
+          }
+        />
+      ) : activeTab === 'availableOrders' ? (
+        <FlashList
+          style={styles.scroll}
+          data={orders}
+          keyExtractor={(order) => String(order.id)}
+          renderItem={({ item }) => (
+            <OrderCard order={item} showActions onShowLocation={handleShowLocation}
+              onShowRestaurantLocation={handleShowRestaurantLocation} onAccept={acceptOrder}
+              updatingStatus={updatingStatus} tabType="availableOrders" ot={ot} isRTL={isRTL}
+              hasActiveOrders={assignedOrders.length > 0 || pickedUpOrders.length > 0} />
+          )}
+          contentContainerStyle={{ paddingHorizontal: DS.sp.lg, paddingTop: DS.sp.xs, paddingBottom: insets.bottom + 16 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={DS.colors.accent} colors={[DS.colors.accent]} />}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={orders.length > 0 ? <SectionHeader title={ot.sectionAvailable} count={orders.length} dotColor={DS.colors.accent} isRTL={isRTL} /> : null}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconWrap}><Ionicons name="checkmark-circle" size={36} color={DS.colors.gray3} /></View>
+              <Text style={styles.emptyTitle}>{ot.emptyAvailable}</Text>
+              <Text style={styles.emptySub}>{ot.emptyAvailableSub}</Text>
+            </View>
+          }
+        />
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={DS.colors.accent} colors={[DS.colors.accent]} />}
+          showsVerticalScrollIndicator={false}
+        >
+          {pickedUpOrders.length > 0 && (
+            <View style={styles.section}>
+              <SectionHeader title={ot.sectionOnTheWay} count={pickedUpOrders.length} dotColor={DS.colors.blue} isRTL={isRTL} />
+              {pickedUpOrders.map(order => (
+                <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
+                  onShowRestaurantLocation={handleShowRestaurantLocation} onMarkDelivered={markAsDelivered}
+                  updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
+              ))}
+            </View>
+          )}
+          {assignedOrders.length > 0 && (
+            <View style={styles.section}>
+              <SectionHeader title={ot.sectionAssigned} count={assignedOrders.length} dotColor={DS.colors.orange} pulse isRTL={isRTL} />
+              {assignedOrders.map(order => (
+                <OrderCard key={order.id} order={order} showActions onShowLocation={handleShowLocation}
+                  onShowRestaurantLocation={handleShowRestaurantLocation} onPickUp={markAsPickedUp}
+                  updatingStatus={updatingStatus} tabType="accepted" ot={ot} isRTL={isRTL} />
+              ))}
+            </View>
+          )}
+          {assignedOrders.length === 0 && pickedUpOrders.length === 0 && (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconWrap}><Ionicons name="bicycle" size={36} color={DS.colors.gray3} /></View>
+              <Text style={styles.emptyTitle}>{ot.emptyActive}</Text>
+              <Text style={styles.emptySub}>{ot.emptyActiveSub}</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
 
       <Modal visible={showMap} animationType="slide" onRequestClose={() => setShowMap(false)}>
-        <View style={styles.mapContainer}>
-          <View style={styles.mapHeader}>
+        <View style={[styles.mapContainer, { paddingBottom: insets.bottom }]}>
+          <View style={[styles.mapHeader, { paddingTop: insets.top + (Platform.OS === 'ios' ? 10 : 20) }]}>
             <TouchableOpacity onPress={() => { setShowMap(false); setSelectedOrder(null); }} style={styles.mapCloseBtn}>
               <Ionicons name="close" size={22} color={DS.colors.white} />
             </TouchableOpacity>
@@ -1453,6 +1668,15 @@ totalValue: {
   itemsCount: { fontSize: 12, fontWeight: '600', color: DS.colors.gray2 },
   itemsSummary: { fontSize: 13, color: DS.colors.gray1, lineHeight: 18 },
 
+  prepTimeBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: DS.colors.amberDim, borderWidth: 1, borderColor: DS.colors.amber + '44', borderRadius: DS.r.sm, paddingHorizontal: DS.sp.md, paddingVertical: DS.sp.sm, marginBottom: DS.sp.md },
+  prepTimeBoxOverdue: { backgroundColor: DS.colors.dangerDim, borderColor: DS.colors.danger + '44' },
+  prepTimeText: { fontSize: 13, color: DS.colors.gray1, fontWeight: '600' },
+  prepTimeValue: { color: DS.colors.amber, fontWeight: '700' },
+
+  instructionsBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: DS.colors.amberDim, borderWidth: 1, borderColor: DS.colors.amber + '44', borderRadius: DS.r.sm, padding: DS.sp.md, marginBottom: DS.sp.md },
+  instructionsLabel: { fontSize: 10, fontWeight: '700', color: DS.colors.amber, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  instructionsText: { fontSize: 13, color: DS.colors.gray1, lineHeight: 18 },
+
   // Deal type badge (shown in items header)
   dealTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: DS.colors.purpleDim, paddingHorizontal: 7, paddingVertical: 2, borderRadius: DS.r.round, borderWidth: 1, borderColor: DS.colors.purple + '44', marginLeft: DS.sp.sm },
   dealTypeBadgeText: { fontSize: 10, fontWeight: '700', color: DS.colors.purple },
@@ -1460,7 +1684,8 @@ totalValue: {
   // Deals list
   dealsList: { gap: DS.sp.xs, marginTop: DS.sp.xs },
   dealRow: { flexDirection: 'row', alignItems: 'flex-start', gap: DS.sp.sm },
-  dealIconWrap: { width: 20, height: 20, borderRadius: DS.r.sm, backgroundColor: DS.colors.purpleDim, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: DS.colors.purple + '33' },
+  dealIconWrap: { width: 28, height: 28, borderRadius: DS.r.sm, backgroundColor: DS.colors.purpleDim, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: DS.colors.purple + '33', overflow: 'hidden' },
+  dealImage: { width: 28, height: 28, borderRadius: DS.r.sm },
   dealInfo: { flex: 1 },
   dealName: { fontSize: 13, fontWeight: '600', color: DS.colors.white, lineHeight: 18 },
   dealPriceRow: { flexDirection: 'row', alignItems: 'center', gap: DS.sp.sm, marginTop: 2 },
@@ -1477,8 +1702,17 @@ totalValue: {
   regularItemPrice: { fontSize: 12, fontWeight: '600', color: DS.colors.gray2 },
 
   // Size badge
+  imagePreviewBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'center', alignItems: 'center', padding: DS.sp.xl },
+  imagePreviewCard: { width: '100%', maxWidth: 420, aspectRatio: 1, backgroundColor: DS.colors.bgCard, borderRadius: DS.r.xl, overflow: 'hidden', borderWidth: 1, borderColor: DS.colors.sep },
+  imagePreviewImage: { width: '100%', height: '100%' },
+  imagePreviewCloseBtn: { position: 'absolute', top: DS.sp.md, right: DS.sp.md, zIndex: 10, width: 34, height: 34, borderRadius: DS.r.round, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  itemImageWrap: { width: 28, height: 28, borderRadius: DS.r.sm, backgroundColor: DS.colors.bgCard, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: DS.colors.sep },
+  itemImage: { width: 28, height: 28, borderRadius: DS.r.sm },
   sizeBadge: { backgroundColor: DS.colors.bgCardAlt, paddingHorizontal: 6, paddingVertical: 2, borderRadius: DS.r.sm, borderWidth: 1, borderColor: DS.colors.sep },
   sizeBadgeText: { fontSize: 10, fontWeight: '700', color: DS.colors.blue },
+  optionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, marginBottom: 4 },
+  optionBadge: { backgroundColor: DS.colors.purpleDim, paddingHorizontal: 6, paddingVertical: 2, borderRadius: DS.r.sm, borderWidth: 1, borderColor: DS.colors.purple + '33' },
+  optionBadgeText: { fontSize: 10, fontWeight: '600', color: DS.colors.purple },
   detailsGrid: { gap: DS.sp.sm, marginBottom: DS.sp.md },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: DS.sp.sm },
   detailText: { flex: 1, fontSize: 13, color: DS.colors.gray1, lineHeight: 18 },
@@ -1526,6 +1760,7 @@ const styles = StyleSheet.create({
   tabTextActive: { color: DS.colors.accent, fontWeight: '700' },
   tabBadge: { minWidth: 18, height: 18, borderRadius: DS.r.round, backgroundColor: DS.colors.bgCardAlt, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
   tabBadgeActive: { backgroundColor: DS.colors.accent },
+
   tabBadgeText: { fontSize: 10, fontWeight: '800', color: DS.colors.gray2 },
   tabBadgeTextActive: { color: DS.colors.bg },
   scroll: { flex: 1 },
@@ -1542,7 +1777,7 @@ const styles = StyleSheet.create({
   mapWebView: { flex: 1 },
   mapLoadingWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: DS.colors.bg },
   mapLoadingText: { marginTop: DS.sp.md, fontSize: 14, color: DS.colors.gray2, fontWeight: '500' },
-  mapInfo: { backgroundColor: DS.colors.bgCard, padding: DS.sp.lg, borderTopWidth: 1, borderTopColor: DS.colors.sep },
+  mapInfo: { backgroundColor: DS.colors.bgCard, paddingHorizontal: DS.sp.lg, paddingTop: DS.sp.lg, paddingBottom: DS.sp.lg + 4, borderTopWidth: 1, borderTopColor: DS.colors.sep },
   mapInfoHeader: { flexDirection: 'row', gap: DS.sp.md, marginBottom: DS.sp.md },
   mapInfoIcon: { width: 42, height: 42, borderRadius: DS.r.md, backgroundColor: DS.colors.dangerDim, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: DS.colors.danger + '33' },
   mapInfoContent: { flex: 1 },

@@ -517,65 +517,11 @@ const DashboardScreen: React.FC = () => {
     }
   }, [dashboardT]);
 
-const updateLocation = useCallback(async () => {
-  try {
-    const token = await AsyncStorage.getItem('deliveryManToken');
-    if (!token) return;
-
-    // 1) Check if device location services are ON
-    const servicesEnabled = await Location.hasServicesEnabledAsync();
-    if (!servicesEnabled) {
-      console.log('Location services are disabled on this device');
-      return;
-    }
-
-    // 2) Ask permission
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      console.log('Location permission not granted');
-      return;
-    }
-
-    // 3) Try last known location first for speed/stability
-    let location = await Location.getLastKnownPositionAsync();
-
-    // 4) Fallback to fresh GPS location if needed
-    if (!location) {
-      location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-    }
-
-    if (!location?.coords) {
-      console.log('Could not get location coords');
-      return;
-    }
-
-    await axios.put(
-      'https://ubua.cloud/api/delivery/update-location',
-      {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000,
-      }
-    );
-
-    console.log('Location updated:', location.coords.latitude, location.coords.longitude);
-  } catch (error: any) {
-    console.error('Error updating location:', error?.message || error);
-  }
-}, []);
-
   useEffect(() => {
     fetchMetrics();
     const unsubscribe = realtimeService.subscribe('dashboard', fetchMetrics, 10000);
-    const locationInterval = setInterval(() => { updateLocation(); }, 10000);
-    updateLocation();
-    return () => { unsubscribe(); clearInterval(locationInterval); };
-  }, [fetchMetrics, updateLocation]);
+    return () => { unsubscribe(); };
+  }, [fetchMetrics]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -646,8 +592,11 @@ const updateLocation = useCallback(async () => {
     ? metrics.todayEarnings > metrics.yesterdayEarnings ? 'up' : metrics.todayEarnings < metrics.yesterdayEarnings ? 'down' : 'flat'
     : 'flat';
 
+  // Mirrors the tab bar in app/(tabs)/_layout.tsx: bottom: SPACING.lg, height: 64 + insets.bottom
+  const tabBarClearance = 16 + 64 + insets.bottom + 24;
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: 70 }]}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor={T.colors.bg} />
 
       <LinearGradient
@@ -689,7 +638,7 @@ const updateLocation = useCallback(async () => {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBarClearance }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.colors.accent} colors={[T.colors.accent]} />
         }
